@@ -15,11 +15,29 @@ const THUMB_TIP = 4;
 const INDEX_TIP = 8;
 const MIDDLE_MCP = 9;
 
-const PINCH_ON = 0.32;
-const PINCH_OFF = 0.45;
+const PINCH_ON = 0.34;
+const PINCH_OFF = 0.48;
 
-const ROTATE_SPEED = 5.0;
-const SMOOTHING = 0.4;
+// Lower than your previous value to reduce shaky/jumpy movement.
+const ROTATE_SPEED = 4.2;
+
+// Higher = smoother, lower = more responsive.
+const POSITION_SMOOTHING = 0.55;
+
+// Additional movement dead-zone.
+const MOVEMENT_DEADZONE = 0.0015;
+
+// Limit maximum movement applied during one camera frame.
+const MAX_ROTATION_STEP = 0.12;
+
+// Zoom smoothing.
+const ZOOM_SMOOTHING = 0.35;
+const MIN_ZOOM_DISTANCE = 0.035;
+
+// Process camera frames at approximately 30 FPS.
+// The orb itself can continue rendering at 60 FPS.
+const TARGET_TRACKING_FPS = 30;
+const MIN_FRAME_INTERVAL = 1000 / TARGET_TRACKING_FPS;
 
 export type GestureMode = "idle" | "spin" | "zoom";
 
@@ -42,6 +60,7 @@ interface Point {
 interface HandState {
   pinching: boolean;
   grab: Point;
+  lastSeen: number;
 }
 
 export class HandTracker {
@@ -53,15 +72,21 @@ export class HandTracker {
   private stream: MediaStream | null = null;
 
   private rafId = 0;
+
   private running = false;
   private starting = false;
+
   private lastVideoTime = -1;
+  private lastProcessTime = 0;
 
   private handStates = new Map<string, HandState>();
 
   private prevMode: GestureMode = "idle";
+
   private prevSpinGrab: Point | null = null;
+
   private prevZoomDist: number | null = null;
+  private smoothZoomDist: number | null = null;
 
   private lastStatus: TrackerStatus = {
     hands: 0,
@@ -99,24 +124,32 @@ export class HandTracker {
           height: {
             ideal: 480,
           },
+          frameRate: {
+            ideal: 30,
+            max: 30,
+          },
           facingMode: "user",
         },
         audio: false,
       });
 
-      if (!this.stream) {
-        throw new Error("Camera stream unavailable");
-      }
-
       this.video.srcObject = this.stream;
+
+      this.video.setAttribute("playsinline", "true");
+      this.video.muted = true;
 
       await this.video.play();
 
       const fileset =
         await FilesetResolver.forVisionTasks(WASM_CDN);
 
-      const baseOptions = {
-        modelAssetPath: MODEL_URL,
+      const commonOptions = {
+        runningMode: "VIDEO" as const,
+        numHands: 2,
+
+        minHandDetectionConfidence: 0.55,
+        minHandPresenceConfidence: 0.55,
+        minTrackingConfidence: 0.55,
       };
 
       try {
@@ -124,20 +157,16 @@ export class HandTracker {
           await HandLandmarker.createFromOptions(
             fileset,
             {
+              ...commonOptions,
               baseOptions: {
-                ...baseOptions,
+                modelAssetPath: MODEL_URL,
                 delegate: "GPU",
               },
-              runningMode: "VIDEO",
-              numHands: 2,
-              minHandDetectionConfidence: 0.6,
-              minHandPresenceConfidence: 0.6,
-              minTrackingConfidence: 0.6,
             },
           );
       } catch (gpuError) {
         console.warn(
-          "GPU delegate failed. Falling back to CPU.",
+          "MediaPipe GPU initialization failed. Falling back to CPU.",
           gpuError,
         );
 
@@ -145,21 +174,18 @@ export class HandTracker {
           await HandLandmarker.createFromOptions(
             fileset,
             {
+              ...commonOptions,
               baseOptions: {
-                ...baseOptions,
+                modelAssetPath: MODEL_URL,
                 delegate: "CPU",
               },
-              runningMode: "VIDEO",
-              numHands: 2,
-              minHandDetectionConfidence: 0.6,
-              minHandPresenceConfidence: 0.6,
-              minTrackingConfidence: 0.6,
             },
           );
       }
 
       this.running = true;
       this.lastVideoTime = -1;
+      this.lastProcessTime = 0;
 
       this.loop();
     } catch (error) {
@@ -174,7 +200,7 @@ export class HandTracker {
     this.running = false;
     this.starting = false;
 
-    if (this.rafId) {
+    if (this.rafId !== 0) {
       cancelAnimationFrame(this.rafId);
       this.rafId = 0;
     }
@@ -183,20 +209,27 @@ export class HandTracker {
       this.landmarker?.close();
     } catch (error) {
       console.warn(
-        "Failed to close MediaPipe landmarker:",
+        "Failed to close MediaPipe:",
         error,
       );
     }
 
     this.landmarker = null;
 
-    this.stream?.getTracks().forEach((track) => {
-      track.stop();
-    });
+    if (this.stream) {
+      for (const track of this.stream.getTracks()) {
+        track.stop();
+      }
+    }
 
     this.stream = null;
 
-    this.video.pause();
+    try {
+      this.video.pause();
+    } catch {
+      // Ignore video cleanup errors.
+    }
+
     this.video.srcObject = null;
 
     this.handStates.clear();
@@ -204,19 +237,12 @@ export class HandTracker {
     this.prevMode = "idle";
     this.prevSpinGrab = null;
     this.prevZoomDist = null;
+    this.smoothZoomDist = null;
 
     this.lastVideoTime = -1;
+    this.lastProcessTime = 0;
 
-    const ctx = this.overlay.getContext("2d");
-
-    if (ctx) {
-      ctx.clearRect(
-        0,
-        0,
-        this.overlay.width,
-        this.overlay.height,
-      );
-    }
+    this.clearOverlay();
 
     this.emitStatus({
       hands: 0,
@@ -229,39 +255,61 @@ export class HandTracker {
 
     this.rafId = requestAnimationFrame(this.loop);
 
+    if (!this.landmarker) return;
+
     if (
-      !this.landmarker ||
-      this.video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
+      this.video.readyState <
+      HTMLMediaElement.HAVE_CURRENT_DATA
     ) {
       return;
     }
 
-    if (this.video.currentTime === this.lastVideoTime) {
+    const now = performance.now();
+
+    // Keep the rendering loop independent from MediaPipe.
+    if (
+      now - this.lastProcessTime <
+      MIN_FRAME_INTERVAL
+    ) {
       return;
     }
 
-    this.lastVideoTime = this.video.currentTime;
+    if (
+      this.video.currentTime ===
+      this.lastVideoTime
+    ) {
+      return;
+    }
+
+    this.lastProcessTime = now;
+    this.lastVideoTime =
+      this.video.currentTime;
 
     try {
-      const result = this.landmarker.detectForVideo(
-        this.video,
-        performance.now(),
-      );
+      const result =
+        this.landmarker.detectForVideo(
+          this.video,
+          now,
+        );
 
-      const labels = result.handedness.map(
-        (hand) =>
-          hand[0]?.categoryName ?? "?",
-      );
+      const labels =
+        result.handedness.map(
+          (hand, index) =>
+            hand[0]?.categoryName ??
+            `hand-${index}`,
+        );
 
       this.processHands(
         result.landmarks,
         labels,
       );
 
-      this.drawOverlay(result.landmarks);
+      this.drawOverlay(
+        result.landmarks,
+      );
     } catch (error) {
-      console.error(
-        "MediaPipe frame processing error:",
+      console.warn(
+        "MediaPipe frame error:",
         error,
       );
     }
@@ -271,21 +319,38 @@ export class HandTracker {
     landmarks: NormalizedLandmark[][],
     labels: string[],
   ): void {
+    const now = performance.now();
+
     const pinchedGrabs: Point[] = [];
+
     const seen = new Set<string>();
 
-    landmarks.forEach((lm, i) => {
-      const label = labels[i] ?? `hand-${i}`;
+    for (let i = 0; i < landmarks.length; i++) {
+      const lm = landmarks[i];
+
+      const label =
+        labels[i] ??
+        `hand-${i}`;
 
       seen.add(label);
 
-      const handScale = dist2d(
-        lm[WRIST],
-        lm[MIDDLE_MCP],
-      );
+      if (
+        !lm[WRIST] ||
+        !lm[THUMB_TIP] ||
+        !lm[INDEX_TIP] ||
+        !lm[MIDDLE_MCP]
+      ) {
+        continue;
+      }
 
-      if (handScale < 1e-6) {
-        return;
+      const handScale =
+        dist2d(
+          lm[WRIST],
+          lm[MIDDLE_MCP],
+        );
+
+      if (handScale < 0.001) {
+        continue;
       }
 
       const pinchRatio =
@@ -313,7 +378,10 @@ export class HandTracker {
       if (!state) {
         state = {
           pinching: false,
-          grab: raw,
+          grab: {
+            ...raw,
+          },
+          lastSeen: now,
         };
 
         this.handStates.set(
@@ -322,6 +390,9 @@ export class HandTracker {
         );
       }
 
+      state.lastSeen = now;
+
+      // Pinch hysteresis.
       if (
         state.pinching &&
         pinchRatio > PINCH_OFF
@@ -334,27 +405,36 @@ export class HandTracker {
         state.pinching = true;
       }
 
-      state.grab = {
-        x:
-          state.grab.x +
-          (raw.x - state.grab.x) *
-            SMOOTHING,
+      state.grab.x =
+        lerp(
+          state.grab.x,
+          raw.x,
+          POSITION_SMOOTHING,
+        );
 
-        y:
-          state.grab.y +
-          (raw.y - state.grab.y) *
-            SMOOTHING,
-      };
+      state.grab.y =
+        lerp(
+          state.grab.y,
+          raw.y,
+          POSITION_SMOOTHING,
+        );
 
       if (state.pinching) {
-        pinchedGrabs.push(
-          state.grab,
-        );
+        pinchedGrabs.push({
+          ...state.grab,
+        });
       }
-    });
+    }
 
-    for (const key of this.handStates.keys()) {
-      if (!seen.has(key)) {
+    // Remove stale hands.
+    for (const [
+      key,
+      state,
+    ] of this.handStates) {
+      if (
+        !seen.has(key) ||
+        now - state.lastSeen > 300
+      ) {
         this.handStates.delete(key);
       }
     }
@@ -366,14 +446,17 @@ export class HandTracker {
           ? "spin"
           : "idle";
 
+    // Reset reference points whenever the gesture changes.
     if (mode !== this.prevMode) {
       this.prevSpinGrab = null;
       this.prevZoomDist = null;
+      this.smoothZoomDist = null;
       this.prevMode = mode;
     }
 
     if (mode === "spin") {
-      const grab = pinchedGrabs[0];
+      const grab =
+        pinchedGrabs[0];
 
       if (this.prevSpinGrab) {
         const dx =
@@ -384,13 +467,41 @@ export class HandTracker {
           grab.y -
           this.prevSpinGrab.y;
 
+        const filteredDx =
+          Math.abs(dx) <
+          MOVEMENT_DEADZONE
+            ? 0
+            : dx;
+
+        const filteredDy =
+          Math.abs(dy) <
+          MOVEMENT_DEADZONE
+            ? 0
+            : dy;
+
         if (
-          Math.abs(dx) > 1e-4 ||
-          Math.abs(dy) > 1e-4
+          filteredDx !== 0 ||
+          filteredDy !== 0
         ) {
+          const theta =
+            clamp(
+              filteredDx *
+                ROTATE_SPEED,
+              -MAX_ROTATION_STEP,
+              MAX_ROTATION_STEP,
+            );
+
+          const phi =
+            clamp(
+              filteredDy *
+                ROTATE_SPEED,
+              -MAX_ROTATION_STEP,
+              MAX_ROTATION_STEP,
+            );
+
           this.callbacks.onRotate(
-            dx * ROTATE_SPEED,
-            dy * ROTATE_SPEED,
+            theta,
+            phi,
           );
         }
       }
@@ -401,32 +512,60 @@ export class HandTracker {
     }
 
     if (mode === "zoom") {
-      const d = Math.hypot(
+      const dx =
         pinchedGrabs[0].x -
-          pinchedGrabs[1].x,
+        pinchedGrabs[1].x;
 
+      const dy =
         pinchedGrabs[0].y -
-          pinchedGrabs[1].y,
-      );
+        pinchedGrabs[1].y;
+
+      const distance =
+        Math.hypot(dx, dy);
+
+      if (
+        this.smoothZoomDist === null
+      ) {
+        this.smoothZoomDist =
+          distance;
+      } else {
+        this.smoothZoomDist =
+          lerp(
+            this.smoothZoomDist,
+            distance,
+            ZOOM_SMOOTHING,
+          );
+      }
 
       if (
         this.prevZoomDist !== null &&
-        d > 1e-4
+        this.smoothZoomDist >
+          MIN_ZOOM_DISTANCE
       ) {
-        const factor = Math.min(
-          1.18,
-          Math.max(
-            0.85,
-            this.prevZoomDist / d,
-          ),
-        );
+        const ratio =
+          this.prevZoomDist /
+          this.smoothZoomDist;
 
-        this.callbacks.onZoom(
-          factor,
-        );
+        const factor =
+          clamp(
+            ratio,
+            0.94,
+            1.06,
+          );
+
+        if (
+          Math.abs(
+            factor - 1,
+          ) > 0.003
+        ) {
+          this.callbacks.onZoom(
+            factor,
+          );
+        }
       }
 
-      this.prevZoomDist = d;
+      this.prevZoomDist =
+        this.smoothZoomDist;
     }
 
     this.emitStatus({
@@ -439,16 +578,19 @@ export class HandTracker {
     status: TrackerStatus,
   ): void {
     if (
-      status.hands !==
-        this.lastStatus.hands ||
-      status.mode !==
+      status.hands ===
+        this.lastStatus.hands &&
+      status.mode ===
         this.lastStatus.mode
     ) {
-      this.lastStatus = status;
-      this.callbacks.onStatus(
-        status,
-      );
+      return;
     }
+
+    this.lastStatus = status;
+
+    this.callbacks.onStatus(
+      status,
+    );
   }
 
   private drawOverlay(
@@ -459,10 +601,11 @@ export class HandTracker {
 
     if (!ctx) return;
 
-    const {
-      width,
-      height,
-    } = this.overlay;
+    const width =
+      this.overlay.width;
+
+    const height =
+      this.overlay.height;
 
     ctx.clearRect(
       0,
@@ -477,6 +620,10 @@ export class HandTracker {
 
       const index =
         lm[INDEX_TIP];
+
+      if (!thumb || !index) {
+        continue;
+      }
 
       const tx =
         (1 - thumb.x) *
@@ -501,7 +648,7 @@ export class HandTracker {
         );
 
       const pinched =
-        handScale > 1e-6 &&
+        handScale > 0.001 &&
         dist2d(
           thumb,
           index,
@@ -512,7 +659,7 @@ export class HandTracker {
       ctx.strokeStyle =
         pinched
           ? "#ffcc66"
-          : "rgba(255,170,48,0.5)";
+          : "rgba(255,170,48,0.55)";
 
       ctx.lineWidth =
         pinched ? 2 : 1;
@@ -525,26 +672,71 @@ export class HandTracker {
       ctx.fillStyle =
         pinched
           ? "#ffcc66"
-          : "rgba(255,170,48,0.7)";
+          : "rgba(255,170,48,0.75)";
 
-      for (const [x, y] of [
-        [tx, ty],
-        [ix, iy],
-      ]) {
-        ctx.beginPath();
+      drawDot(
+        ctx,
+        tx,
+        ty,
+        pinched ? 5 : 3,
+      );
 
-        ctx.arc(
-          x,
-          y,
-          pinched ? 5 : 3,
-          0,
-          Math.PI * 2,
-        );
-
-        ctx.fill();
-      }
+      drawDot(
+        ctx,
+        ix,
+        iy,
+        pinched ? 5 : 3,
+      );
     }
   }
+
+  private clearOverlay(): void {
+    const ctx =
+      this.overlay.getContext("2d");
+
+    ctx?.clearRect(
+      0,
+      0,
+      this.overlay.width,
+      this.overlay.height,
+    );
+  }
+}
+
+function drawDot(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+): void {
+  ctx.beginPath();
+  ctx.arc(
+    x,
+    y,
+    radius,
+    0,
+    Math.PI * 2,
+  );
+  ctx.fill();
+}
+
+function lerp(
+  a: number,
+  b: number,
+  amount: number,
+): number {
+  return a + (b - a) * amount;
+}
+
+function clamp(
+  value: number,
+  min: number,
+  max: number,
+): number {
+  return Math.min(
+    max,
+    Math.max(min, value),
+  );
 }
 
 function dist2d(
