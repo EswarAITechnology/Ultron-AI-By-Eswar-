@@ -6,250 +6,103 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 
 export interface OrbSceneApi {
-  rotateBy(
-    deltaTheta: number,
-    deltaPhi: number,
-  ): void;
-
-  zoomBy(
-    factor: number,
-  ): void;
-
+  rotateBy(deltaTheta: number, deltaPhi: number): void;
+  zoomBy(factor: number): void;
   zoomIn(): void;
   zoomOut(): void;
   resetView(): void;
   dispose(): void;
 }
 
-const HOME_POSITION =
-  new THREE.Vector3(
-    0,
-    0.5,
-    5.5,
-  );
-
-const MIN_DISTANCE = 0.6;
+const HOME_POSITION = new THREE.Vector3(0, 0.5, 5.5);
+const MIN_DISTANCE = 0.55;
 const MAX_DISTANCE = 40;
 
-const TARGET_FPS = 60;
+export function createOrbScene(container: HTMLElement): OrbSceneApi {
+  const width = Math.max(container.clientWidth, 1);
+  const height = Math.max(container.clientHeight, 1);
 
-export function createOrbScene(
-  container: HTMLElement,
-): OrbSceneApi {
-  const width =
-    Math.max(
-      1,
-      container.clientWidth,
-    );
+  // =========================================================
+  // SCENE
+  // =========================================================
 
-  const height =
-    Math.max(
-      1,
-      container.clientHeight,
-    );
+  const scene = new THREE.Scene();
+
+  scene.background = new THREE.Color(0x010207);
+
+  const camera = new THREE.PerspectiveCamera(
+    55,
+    width / height,
+    0.05,
+    500,
+  );
+
+  camera.position.copy(HOME_POSITION);
+
+  // =========================================================
+  // RENDERER
+  // =========================================================
+
+  const renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    powerPreference: "high-performance",
+    alpha: false,
+  });
+
+  renderer.setSize(width, height, false);
+
+  // Avoid unnecessarily high GPU load.
+  renderer.setPixelRatio(
+    Math.min(window.devicePixelRatio || 1, 1.5),
+  );
+
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  container.appendChild(renderer.domElement);
+
+  renderer.domElement.style.width = "100%";
+  renderer.domElement.style.height = "100%";
+  renderer.domElement.style.display = "block";
+
+  // =========================================================
+  // POST PROCESSING
+  // =========================================================
+
+  const composer = new EffectComposer(renderer);
+
+  const renderPass = new RenderPass(scene, camera);
+  composer.addPass(renderPass);
 
   /*
-   * Detect device capability.
-   *
-   * Important:
-   * We do NOT force actual 4K rendering on mobile.
-   * Instead, we preserve the 4K-style visual appearance
-   * while keeping the internal render resolution sane.
+   * Soft bloom creates the blurred neon/orb effect.
    */
-  const isMobile =
-    /Android|iPhone|iPad|iPod/i.test(
-      navigator.userAgent,
-    );
-
-  const deviceMemory =
-    (
-      navigator as Navigator & {
-        deviceMemory?: number;
-      }
-    ).deviceMemory ?? 4;
-
-  const cores =
-    navigator.hardwareConcurrency ??
-    4;
-
-  let quality: "high" | "balanced" | "performance";
-
-  if (
-    !isMobile &&
-    deviceMemory >= 8 &&
-    cores >= 8
-  ) {
-    quality = "high";
-  } else if (
-    deviceMemory >= 4 &&
-    cores >= 6
-  ) {
-    quality = "balanced";
-  } else {
-    quality = "performance";
-  }
-
-  const pixelRatioLimit =
-    quality === "high"
-      ? 2
-      : quality === "balanced"
-        ? 1.5
-        : 1.15;
-
-  const textOuterCount =
-    quality === "high"
-      ? 650
-      : quality === "balanced"
-        ? 420
-        : 280;
-
-  const textAmbientCount =
-    quality === "high"
-      ? 180
-      : quality === "balanced"
-        ? 120
-        : 80;
-
-  const debrisCount =
-    quality === "high"
-      ? 180
-      : quality === "balanced"
-        ? 130
-        : 90;
-
-  const dustCount =
-    quality === "high"
-      ? 1500
-      : quality === "balanced"
-        ? 1000
-        : 650;
-
-  // ─────────────────────────────────────────────
-  // SCENE
-  // ─────────────────────────────────────────────
-
-  const scene =
-    new THREE.Scene();
-
-  const camera =
-    new THREE.PerspectiveCamera(
-      55,
-      width / height,
-      0.1,
-      500,
-    );
-
-  camera.position.copy(
-    HOME_POSITION,
+  const bloom = new UnrealBloomPass(
+    new THREE.Vector2(width, height),
+    1.45,
+    0.75,
+    0.08,
   );
 
-  const renderer =
-    new THREE.WebGLRenderer({
-      antialias:
-        quality !== "performance",
+  composer.addPass(bloom);
 
-      powerPreference:
-        "high-performance",
-
-      alpha: false,
-
-      stencil: false,
-
-      depth: true,
-    });
-
-  renderer.setSize(
-    width,
-    height,
-    false,
-  );
-
-  renderer.setPixelRatio(
-    Math.min(
-      window.devicePixelRatio || 1,
-      pixelRatioLimit,
-    ),
-  );
-
-  renderer.toneMapping =
-    THREE.ACESFilmicToneMapping;
-
-  renderer.toneMappingExposure =
-    0.8;
-
-  renderer.outputColorSpace =
-    THREE.SRGBColorSpace;
-
-  renderer.domElement.style.display =
-    "block";
-
-  renderer.domElement.style.width =
-    "100%";
-
-  renderer.domElement.style.height =
-    "100%";
-
-  renderer.domElement.style.touchAction =
-    "none";
-
-  container.appendChild(
-    renderer.domElement,
-  );
-
-  // ─────────────────────────────────────────────
-  // POST PROCESSING
-  // ─────────────────────────────────────────────
-
-  const composer =
-    new EffectComposer(
-      renderer,
-    );
-
-  composer.addPass(
-    new RenderPass(
-      scene,
-      camera,
-    ),
-  );
-
-  const bloom =
-    new UnrealBloomPass(
-      new THREE.Vector2(
-        width,
-        height,
-      ),
-
-      quality === "high"
-        ? 1.7
-        : quality === "balanced"
-          ? 1.45
-          : 1.2,
-
-      0.35,
-
-      0.2,
-    );
-
-  composer.addPass(
-    bloom,
-  );
-
-  const chromaticShader = {
+  /*
+   * Final soft color/glow shader.
+   *
+   * This gives the orb:
+   * - soft amber glow
+   * - slight RGB separation
+   * - subtle edge haze
+   * - cinematic blur
+   */
+  const glowShader = {
     uniforms: {
-      tDiffuse: {
-        value: null,
-      },
-
-      uTime: {
-        value: 0,
-      },
-
-      uIntensity: {
-        value:
-          quality === "performance"
-            ? 0.0015
-            : 0.0025,
-      },
+      tDiffuse: { value: null },
+      uTime: { value: 0 },
+      uGlow: { value: 0.18 },
+      uChromatic: { value: 0.0018 },
     },
 
     vertexShader: `
@@ -268,143 +121,141 @@ export function createOrbScene(
     fragmentShader: `
       uniform sampler2D tDiffuse;
       uniform float uTime;
-      uniform float uIntensity;
+      uniform float uGlow;
+      uniform float uChromatic;
 
       varying vec2 vUv;
 
       void main() {
-        vec2 dir =
-          vUv - vec2(0.5);
 
-        float d =
-          length(dir);
+        vec2 center = vec2(0.5);
 
-        float offset =
-          uIntensity * d;
+        vec2 direction = vUv - center;
 
-        float flicker =
+        float distanceFromCenter = length(direction);
+
+        // Gentle chromatic separation.
+        float chroma =
+          uChromatic *
+          distanceFromCenter *
+          2.0;
+
+        vec4 redSample = texture2D(
+          tDiffuse,
+          vUv + direction * chroma
+        );
+
+        vec4 greenSample = texture2D(
+          tDiffuse,
+          vUv
+        );
+
+        vec4 blueSample = texture2D(
+          tDiffuse,
+          vUv - direction * chroma
+        );
+
+        vec3 color = vec3(
+          redSample.r,
+          greenSample.g,
+          blueSample.b
+        );
+
+        /*
+         * Very subtle animated breathing glow.
+         */
+        float pulse =
           1.0 +
-          0.008 *
-          sin(uTime * 12.0);
+          sin(uTime * 1.5) * 0.025;
 
-        vec4 cr =
-          texture2D(
-            tDiffuse,
-            vUv + dir * offset
+        color *= pulse;
+
+        /*
+         * Soft center haze.
+         */
+        float centerGlow =
+          1.0 -
+          smoothstep(
+            0.05,
+            0.85,
+            distanceFromCenter
           );
 
-        vec4 cg =
-          texture2D(
-            tDiffuse,
-            vUv
-          );
+        color +=
+          vec3(1.0, 0.42, 0.08) *
+          centerGlow *
+          uGlow;
 
-        vec4 cb =
-          texture2D(
-            tDiffuse,
-            vUv - dir * offset * 0.5
-          );
+        /*
+         * Slight warm color grade.
+         */
+        vec3 warmColor =
+          color *
+          vec3(1.10, 0.90, 0.68);
 
-        vec3 result =
-          vec3(
-            cr.r,
-            cg.g * 1.03,
-            cb.b * 0.72
-          );
-
-        result =
+        color =
           mix(
-            result,
-            result *
-              vec3(
-                1.15,
-                0.85,
-                0.55
-              ),
-            0.22
+            color,
+            warmColor,
+            0.20
           );
 
         gl_FragColor =
-          vec4(
-            result * flicker,
-            1.0
-          );
+          vec4(color, 1.0);
       }
     `,
   };
 
-  const chromaticPass =
-    new ShaderPass(
-      chromaticShader,
-    );
+  const glowPass = new ShaderPass(glowShader);
 
-  composer.addPass(
-    chromaticPass,
+  composer.addPass(glowPass);
+
+  // =========================================================
+  // ORBIT CONTROLS
+  // =========================================================
+
+  const controls = new OrbitControls(
+    camera,
+    renderer.domElement,
   );
 
-  // ─────────────────────────────────────────────
-  // CONTROLS
-  // ─────────────────────────────────────────────
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.045;
 
-  const controls =
-    new OrbitControls(
-      camera,
-      renderer.domElement,
-    );
+  controls.enablePan = false;
 
-  controls.enableDamping =
-    true;
+  controls.enableZoom = true;
 
-  controls.dampingFactor =
-    0.045;
+  controls.zoomSpeed = 1.5;
 
-  controls.minDistance =
-    MIN_DISTANCE;
+  controls.rotateSpeed = 0.85;
 
-  controls.maxDistance =
-    MAX_DISTANCE;
+  controls.minDistance = MIN_DISTANCE;
+  controls.maxDistance = MAX_DISTANCE;
 
-  controls.zoomSpeed =
-    1.2;
+  controls.target.set(0, 0, 0);
 
-  controls.rotateSpeed =
-    0.65;
-
-  controls.enablePan =
-    false;
-
-  controls.enableZoom =
-    true;
-
-  // ─────────────────────────────────────────────
+  // =========================================================
   // COLORS
-  // ─────────────────────────────────────────────
+  // =========================================================
 
-  const C_BRIGHT =
-    0xffaa30;
+  const C_BRIGHT = 0xffb347;
+  const C_MID = 0xff8c1a;
+  const C_DIM = 0xb85c00;
+  const C_FAINT = 0x633300;
+  const C_HOT = 0xffd27a;
 
-  const C_MID =
-    0xdd7700;
-
-  const C_DIM =
-    0x884400;
-
-  const C_FAINT =
-    0x553300;
-
-  const C_HOT =
-    0xffcc66;
-
-  // ─────────────────────────────────────────────
+  // =========================================================
   // ORB ROOT
-  // ─────────────────────────────────────────────
+  // =========================================================
 
-  const orbGroup =
-    new THREE.Group();
+  const orbGroup = new THREE.Group();
 
-  scene.add(
-    orbGroup,
-  );
+  scene.add(orbGroup);
+
+  // =========================================================
+  // MATERIAL HELPERS
+  // =========================================================
 
   function lineMat(
     color: number,
@@ -414,39 +265,32 @@ export function createOrbScene(
       color,
       transparent: true,
       opacity,
-      blending:
-        THREE.AdditiveBlending,
+      blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
   }
+
+  // =========================================================
+  // SPHERE GEOMETRY HELPERS
+  // =========================================================
 
   function latRing(
     radius: number,
     lat: number,
     segs = 96,
   ) {
-    const r =
-      radius *
-      Math.cos(lat);
+    const r = radius * Math.cos(lat);
+    const y = radius * Math.sin(lat);
 
-    const y =
-      radius *
-      Math.sin(lat);
+    const points: THREE.Vector3[] = [];
 
-    const pts: THREE.Vector3[] =
-      [];
-
-    for (
-      let i = 0;
-      i <= segs;
-      i++
-    ) {
+    for (let i = 0; i <= segs; i++) {
       const a =
         (i / segs) *
         Math.PI *
         2;
 
-      pts.push(
+      points.push(
         new THREE.Vector3(
           r * Math.cos(a),
           y,
@@ -456,7 +300,7 @@ export function createOrbScene(
     }
 
     return new THREE.BufferGeometry()
-      .setFromPoints(pts);
+      .setFromPoints(points);
   }
 
   function meridian(
@@ -464,20 +308,15 @@ export function createOrbScene(
     lon: number,
     segs = 96,
   ) {
-    const pts: THREE.Vector3[] =
-      [];
+    const points: THREE.Vector3[] = [];
 
-    for (
-      let i = 0;
-      i <= segs;
-      i++
-    ) {
+    for (let i = 0; i <= segs; i++) {
       const lat =
         (i / segs) *
           Math.PI -
         Math.PI / 2;
 
-      pts.push(
+      points.push(
         new THREE.Vector3(
           radius *
             Math.cos(lat) *
@@ -494,166 +333,133 @@ export function createOrbScene(
     }
 
     return new THREE.BufferGeometry()
-      .setFromPoints(pts);
+      .setFromPoints(points);
   }
 
-  // ─────────────────────────────────────────────
+  // =========================================================
   // OUTER SHELL
-  // ─────────────────────────────────────────────
+  // =========================================================
 
-  const outerShell =
-    new THREE.Group();
+  const outerShell = new THREE.Group();
 
-  const R1 = 2;
+  const R1 = 2.0;
 
-  const latitudeStep =
-    quality === "performance"
-      ? 3
-      : 2;
-
-  for (
-    let i = -15;
-    i <= 15;
-    i += latitudeStep
-  ) {
+  // Latitude grid.
+  for (let i = -13; i <= 13; i++) {
     const lat =
-      (i / 15) *
+      (i / 13) *
       (Math.PI / 2) *
       0.95;
 
-    const opacity =
-      i % 3 === 0
-        ? 0.45
-        : 0.1;
+    const major = i % 3 === 0;
 
     outerShell.add(
       new THREE.Line(
-        latRing(
-          R1,
-          lat,
-        ),
+        latRing(R1, lat),
         lineMat(
-          i % 3 === 0
+          major
             ? C_MID
             : C_FAINT,
-          opacity,
+
+          major
+            ? 0.48
+            : 0.10,
         ),
       ),
     );
   }
 
-  const meridianCount =
-    quality === "performance"
-      ? 18
-      : 24;
-
-  for (
-    let i = 0;
-    i < meridianCount;
-    i++
-  ) {
+  // Longitude grid.
+  for (let i = 0; i < 20; i++) {
     const lon =
-      (i / meridianCount) *
+      (i / 20) *
       Math.PI *
       2;
 
-    const major =
-      i % 6 === 0;
+    const major = i % 5 === 0;
 
     outerShell.add(
       new THREE.Line(
-        meridian(
-          R1,
-          lon,
-        ),
+        meridian(R1, lon),
         lineMat(
           major
             ? C_MID
             : C_FAINT,
+
           major
             ? 0.55
-            : 0.1,
+            : 0.10,
         ),
       ),
     );
   }
 
-  // Cross meridians.
-  const CROSS_LINES =
-    quality === "performance"
-      ? 10
-      : 14;
+  // =========================================================
+  // BRIGHT CROSS LINES
+  // =========================================================
 
-  for (
-    let i = 0;
-    i < 4;
-    i++
-  ) {
-    const lon =
+  const CROSS_LINES = 12;
+  const CROSS_SPREAD = 0.22;
+
+  for (let i = 0; i < 4; i++) {
+    const baseLon =
       (i / 4) *
       Math.PI *
       2;
 
-    for (
-      let j = 0;
-      j < CROSS_LINES;
-      j++
-    ) {
+    for (let j = 0; j < CROSS_LINES; j++) {
       const t =
-        (j /
-          (CROSS_LINES - 1)) *
+        (j / (CROSS_LINES - 1)) *
           2 -
         1;
 
       const offset =
-        (t * 0.25) /
-        2;
+        (t * CROSS_SPREAD) / 2;
 
       const falloff =
         1 -
         Math.abs(t) *
-          0.7;
+          0.65;
 
       outerShell.add(
         new THREE.Line(
           meridian(
             R1,
-            lon + offset,
+            baseLon + offset,
             120,
           ),
           lineMat(
-            Math.abs(t) <
-              0.3
+            Math.abs(t) < 0.3
               ? C_BRIGHT
               : C_MID,
-            0.7 *
-              falloff,
+
+            0.65 * falloff,
           ),
         ),
       );
     }
   }
 
-  // Equator.
-  const EQ_LINES =
-    quality === "performance"
-      ? 10
-      : 16;
+  // =========================================================
+  // BRIGHT EQUATOR
+  // =========================================================
 
-  for (
-    let j = 0;
-    j < EQ_LINES;
-    j++
-  ) {
+  const EQ_LINES = 14;
+  const EQ_SPREAD = 0.30;
+
+  for (let j = 0; j < EQ_LINES; j++) {
     const t =
-      (j /
-        (EQ_LINES - 1)) *
+      (j / (EQ_LINES - 1)) *
         2 -
       1;
 
     const offset =
-      (t * 0.35) /
-      2;
+      (t * EQ_SPREAD) / 2;
+
+    const falloff =
+      1 -
+      Math.abs(t) *
+        0.60;
 
     outerShell.add(
       new THREE.Line(
@@ -663,61 +469,112 @@ export function createOrbScene(
           140,
         ),
         lineMat(
-          Math.abs(t) <
-            0.3
+          Math.abs(t) < 0.3
             ? C_BRIGHT
             : C_MID,
-          0.7 *
-            (1 -
-              Math.abs(t) *
-                0.65),
+
+          0.65 * falloff,
         ),
       ),
     );
   }
 
-  orbGroup.add(
-    outerShell,
-  );
+  orbGroup.add(outerShell);
 
-  // ─────────────────────────────────────────────
+  // =========================================================
+  // SECONDARY SHELL
+  // =========================================================
+
+  const shell2 =
+    new THREE.Group();
+
+  const R2 = 2.10;
+
+  for (let i = 0; i < 12; i++) {
+    const lat =
+      (Math.random() - 0.5) *
+      Math.PI *
+      0.85;
+
+    const startLon =
+      Math.random() *
+      Math.PI *
+      2;
+
+    const arcLen =
+      0.35 +
+      Math.random() *
+        1.0;
+
+    const points: THREE.Vector3[] = [];
+
+    for (let j = 0; j <= 45; j++) {
+      const a =
+        startLon +
+        (j / 45) *
+          arcLen;
+
+      const r =
+        R2 *
+        Math.cos(lat);
+
+      const y =
+        R2 *
+        Math.sin(lat);
+
+      points.push(
+        new THREE.Vector3(
+          r * Math.cos(a),
+          y,
+          r * Math.sin(a),
+        ),
+      );
+    }
+
+    shell2.add(
+      new THREE.Line(
+        new THREE.BufferGeometry()
+          .setFromPoints(points),
+
+        lineMat(
+          C_MID,
+          0.18 +
+            Math.random() *
+              0.22,
+        ),
+      ),
+    );
+  }
+
+  orbGroup.add(shell2);
+
+  // =========================================================
   // INNER CORE
-  // ─────────────────────────────────────────────
+  // =========================================================
 
   const innerCore =
     new THREE.Group();
 
   const R3 = 0.9;
 
-  for (
-    let s = 0;
-    s < 6;
-    s++
-  ) {
-    const pts: THREE.Vector3[] =
-      [];
+  for (let s = 0; s < 6; s++) {
+    const points: THREE.Vector3[] = [];
 
     const turns =
-      3.5 +
-      Math.random();
+      3.0 +
+      Math.random() *
+        1.5;
 
-    const segs =
-      quality === "performance"
-        ? 150
-        : 220;
+    const segments = 180;
 
     const phase =
       (s / 6) *
       Math.PI *
       2;
 
-    for (
-      let i = 0;
-      i <= segs;
-      i++
-    ) {
+    for (let i = 0; i <= segments; i++) {
       const t =
-        i / segs;
+        i / segments;
 
       const lat =
         t *
@@ -731,7 +588,7 @@ export function createOrbScene(
           2 +
         phase;
 
-      pts.push(
+      points.push(
         new THREE.Vector3(
           R3 *
             Math.cos(lat) *
@@ -750,21 +607,20 @@ export function createOrbScene(
     innerCore.add(
       new THREE.Line(
         new THREE.BufferGeometry()
-          .setFromPoints(pts),
+          .setFromPoints(points),
 
         lineMat(
           C_BRIGHT,
-          0.32,
+          0.30 +
+            Math.random() *
+              0.15,
         ),
       ),
     );
   }
 
-  for (
-    let i = -5;
-    i <= 5;
-    i++
-  ) {
+  // Inner latitude rings.
+  for (let i = -5; i <= 5; i++) {
     const lat =
       (i / 5) *
       (Math.PI / 2) *
@@ -775,7 +631,7 @@ export function createOrbScene(
         latRing(
           R3,
           lat,
-          70,
+          64,
         ),
         lineMat(
           C_DIM,
@@ -785,16 +641,13 @@ export function createOrbScene(
     );
   }
 
-  orbGroup.add(
-    innerCore,
-  );
+  orbGroup.add(innerCore);
 
-  // ─────────────────────────────────────────────
-  // CORE
-  // ─────────────────────────────────────────────
+  // =========================================================
+  // HOT CORE
+  // =========================================================
 
-  const coreR =
-    0.25;
+  const coreR = 0.24;
 
   const icoGeo =
     new THREE.IcosahedronGeometry(
@@ -810,7 +663,7 @@ export function createOrbScene(
   const icoWireMat =
     lineMat(
       C_HOT,
-      0.9,
+      0.95,
     );
 
   const icoWire =
@@ -819,15 +672,14 @@ export function createOrbScene(
       icoWireMat,
     );
 
-  orbGroup.add(
-    icoWire,
-  );
+  orbGroup.add(icoWire);
 
+  // Bright center.
   const coreSphereMat =
     new THREE.MeshBasicMaterial({
       color: C_HOT,
       transparent: true,
-      opacity: 0.15,
+      opacity: 0.20,
       blending:
         THREE.AdditiveBlending,
       depthWrite: false,
@@ -837,21 +689,20 @@ export function createOrbScene(
     new THREE.Mesh(
       new THREE.SphereGeometry(
         0.15,
-        12,
-        12,
+        20,
+        20,
       ),
       coreSphereMat,
     );
 
-  orbGroup.add(
-    coreSphere,
-  );
+  orbGroup.add(coreSphere);
 
+  // Large blurred glow sphere.
   const glowSphereMat =
     new THREE.MeshBasicMaterial({
-      color: C_MID,
+      color: C_BRIGHT,
       transparent: true,
-      opacity: 0.04,
+      opacity: 0.06,
       blending:
         THREE.AdditiveBlending,
       depthWrite: false,
@@ -860,64 +711,65 @@ export function createOrbScene(
   const glowSphere =
     new THREE.Mesh(
       new THREE.SphereGeometry(
-        0.5,
-        12,
-        12,
+        0.52,
+        20,
+        20,
       ),
       glowSphereMat,
     );
 
-  orbGroup.add(
-    glowSphere,
-  );
+  orbGroup.add(glowSphere);
 
-  // ─────────────────────────────────────────────
+  // =========================================================
+  // EXTRA OUTER GLOW
+  // =========================================================
+
+  const outerGlowMat =
+    new THREE.MeshBasicMaterial({
+      color: 0xff8c20,
+      transparent: true,
+      opacity: 0.018,
+      blending:
+        THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.BackSide,
+    });
+
+  const outerGlow =
+    new THREE.Mesh(
+      new THREE.SphereGeometry(
+        2.25,
+        32,
+        32,
+      ),
+      outerGlowMat,
+    );
+
+  orbGroup.add(outerGlow);
+
+  // =========================================================
   // CODE TEXT
-  // ─────────────────────────────────────────────
+  // =========================================================
 
   const codeSnippets = [
-    "sys.init()",
+    "SYS.INIT",
     "0xFF3A",
-    "malloc()",
-    ">> SCAN",
-    "void*",
+    "SCAN",
+    "SYNC",
+    "CORE",
+    "EXEC",
     "ACK",
-    "SYNC OK",
-    "ptr_ref",
-    "exec()",
-    "hash256",
-    "::bind",
-    "core.0",
-    "01101001",
-    "10110100",
-    ">>> RDY",
-    "HEAP 4K",
-    "TCP/SYN",
-    "mutex.lk",
-    "IRQ 0x7",
-    "DMA xfer",
-    "REG EAX",
-    "FAULT 0",
-    "kernel.d",
-    "pipe |>",
-    "chmod +x",
-    "fork()",
-    "SIGTERM",
-    "eth0: UP",
-    "AES-256",
-    "RSA 4096",
-    "TLS 1.3",
-    "HTTP/2",
-    "latency",
-    "200 OK",
-    "PATCH /",
-    "fn main",
-    "use std",
-    "impl Orb",
-    "async {}",
-    "spawn()",
-    "arc::new",
-    ".unwrap",
+    "READY",
+    "VECTOR",
+    "AI",
+    "NEURAL",
+    "ORBIT",
+    "DATA",
+    "NODE",
+    "SIGNAL",
+    "ACCESS",
+    "ULTRON",
+    "ONLINE",
   ];
 
   interface SpriteDrift {
@@ -929,41 +781,45 @@ export function createOrbScene(
 
   function makeTextSprite(
     text: string,
-    size: number,
+    size = 0.07,
   ) {
     const canvas =
       document.createElement(
         "canvas",
       );
 
-    canvas.width = 128;
-    canvas.height = 24;
+    canvas.width = 256;
+    canvas.height = 32;
 
     const ctx =
-      canvas.getContext(
-        "2d",
-      );
+      canvas.getContext("2d");
 
     if (!ctx) {
-      return new THREE.Sprite();
+      throw new Error(
+        "Canvas unavailable",
+      );
     }
 
+    ctx.clearRect(
+      0,
+      0,
+      256,
+      32,
+    );
+
     ctx.font =
-      "bold 11px monospace";
+      "bold 14px Courier New";
 
-    ctx.textAlign =
-      "center";
-
-    ctx.textBaseline =
-      "middle";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
 
     ctx.fillStyle =
-      `rgba(255,160,40,0.65)`;
+      "rgba(255,170,48,0.65)";
 
     ctx.fillText(
       text,
-      64,
-      12,
+      128,
+      16,
     );
 
     const texture =
@@ -981,6 +837,7 @@ export function createOrbScene(
       new THREE.SpriteMaterial({
         map: texture,
         transparent: true,
+        opacity: 0.65,
         blending:
           THREE.AdditiveBlending,
         depthWrite: false,
@@ -992,8 +849,8 @@ export function createOrbScene(
       );
 
     sprite.scale.set(
-      size * 4.5,
-      size * 0.6,
+      size * 5,
+      size * 0.7,
       1,
     );
 
@@ -1003,7 +860,7 @@ export function createOrbScene(
   function scatterText(
     count: number,
     sizeFn: () => number,
-    rFn: () => number,
+    radiusFn: () => number,
     speedMin: number,
     speedMax: number,
   ) {
@@ -1028,9 +885,7 @@ export function createOrbScene(
 
       const phi =
         Math.acos(
-          2 *
-            Math.random() -
-            1,
+          2 * Math.random() - 1,
         );
 
       const theta =
@@ -1039,7 +894,7 @@ export function createOrbScene(
         2;
 
       const r =
-        rFn();
+        radiusFn();
 
       sprite.position.set(
         r *
@@ -1059,92 +914,72 @@ export function createOrbScene(
         theta,
         r,
         speed:
-          (
-            speedMin +
+          (speedMin +
             Math.random() *
-              (speedMax -
-                speedMin)
-          ) *
-          (
-            Math.random() >
-            0.5
-              ? 1
-              : -1
-          ),
+              speedMax) *
+          (Math.random() > 0.5
+            ? 1
+            : -1),
       } satisfies SpriteDrift;
 
-      group.add(
-        sprite,
-      );
+      group.add(sprite);
     }
 
     return group;
   }
 
+  // Reduced text counts for smoother performance.
   const textOuter =
     scatterText(
-      textOuterCount,
+      450,
       () =>
-        0.04 +
+        0.035 +
         Math.random() *
           0.035,
       () =>
         R1 +
-        0.03 +
+        0.04 +
         Math.random() *
-          0.06,
-      0.0002,
+          0.08,
+      0.0003,
       0.0007,
     );
 
-  orbGroup.add(
-    textOuter,
-  );
+  orbGroup.add(textOuter);
 
-  const textAmbient =
+  const textInner =
     scatterText(
-      textAmbientCount,
-      () => 0.03,
+      60,
       () =>
-        R3 +
-        0.2 +
+        0.03 +
         Math.random() *
-          0.7,
-      0.0002,
-      0.0005,
+          0.02,
+      () => R3 + 0.03,
+      0.0004,
+      0.0009,
     );
 
-  orbGroup.add(
-    textAmbient,
-  );
+  orbGroup.add(textInner);
 
-  // ─────────────────────────────────────────────
+  // =========================================================
   // DEBRIS
-  // ─────────────────────────────────────────────
+  // =========================================================
 
   const debrisGeos = [
     new THREE.IcosahedronGeometry(
       0.012,
       0,
     ),
-
     new THREE.IcosahedronGeometry(
       0.02,
       0,
     ),
-
-    new THREE.IcosahedronGeometry(
-      0.03,
-      0,
-    ),
-
     new THREE.TetrahedronGeometry(
       0.015,
       0,
     ),
-
     new THREE.OctahedronGeometry(
-      0.018,
+      0.016,
       0,
     ),
   ];
@@ -1157,39 +992,14 @@ export function createOrbScene(
     phase: number;
   }
 
-  const debris:
-    THREE.Mesh[] = [];
-
-  /*
-   * Reuse materials instead of creating a new
-   * material for every debris object.
-   */
-  const debrisMaterials = [
-    new THREE.MeshBasicMaterial({
-      color: C_BRIGHT,
-      transparent: true,
-      opacity: 0.55,
-      blending:
-        THREE.AdditiveBlending,
-      depthWrite: false,
-    }),
-
-    new THREE.MeshBasicMaterial({
-      color: C_MID,
-      transparent: true,
-      opacity: 0.4,
-      blending:
-        THREE.AdditiveBlending,
-      depthWrite: false,
-    }),
-  ];
+  const debris: THREE.Mesh[] = [];
 
   for (
     let i = 0;
-    i < debrisCount;
+    i < 120;
     i++
   ) {
-    const geo =
+    const geometry =
       debrisGeos[
         Math.floor(
           Math.random() *
@@ -1197,51 +1007,46 @@ export function createOrbScene(
         )
       ];
 
-    const mat =
-      debrisMaterials[
-        Math.random() >
-        0.7
-          ? 0
-          : 1
-      ];
+    const material =
+      new THREE.MeshBasicMaterial({
+        color:
+          Math.random() > 0.7
+            ? C_BRIGHT
+            : C_MID,
+        transparent: true,
+        opacity:
+          0.3 +
+          Math.random() *
+            0.5,
+        blending:
+          THREE.AdditiveBlending,
+        depthWrite: false,
+      });
 
     const mesh =
       new THREE.Mesh(
-        geo,
-        mat,
+        geometry,
+        material,
       );
 
     const orbitR =
       1.2 +
-      Math.random() *
-        4;
+      Math.random() * 4.0;
 
     const speed =
-      (
-        0.08 +
-        Math.random() *
-          0.45
-      ) *
-      (
-        Math.random() >
-        0.5
-          ? 1
-          : -1
-      );
+      (0.08 +
+        Math.random() * 0.45) *
+      (Math.random() > 0.5
+        ? 1
+        : -1);
 
     const tiltX =
-      (
-        Math.random() -
-        0.5
-      ) *
+      (Math.random() - 0.5) *
       Math.PI *
       0.9;
 
     const tiltZ =
-      (
-        Math.random() -
-        0.5
-      ) *
+      (Math.random() - 0.5) *
       Math.PI *
       0.5;
 
@@ -1258,18 +1063,16 @@ export function createOrbScene(
       phase,
     } satisfies DebrisOrbit;
 
-    debris.push(
-      mesh,
-    );
+    debris.push(mesh);
 
-    orbGroup.add(
-      mesh,
-    );
+    orbGroup.add(mesh);
   }
 
-  // ─────────────────────────────────────────────
+  // =========================================================
   // DUST
-  // ─────────────────────────────────────────────
+  // =========================================================
+
+  const dustCount = 1000;
 
   const dustPos =
     new Float32Array(
@@ -1281,7 +1084,7 @@ export function createOrbScene(
     i < dustCount;
     i++
   ) {
-    const rr =
+    const radius =
       0.5 +
       Math.pow(
         Math.random(),
@@ -1296,28 +1099,20 @@ export function createOrbScene(
 
     const phi =
       Math.acos(
-        2 *
-          Math.random() -
-          1,
+        2 * Math.random() - 1,
       );
 
-    dustPos[
-      i * 3
-    ] =
-      rr *
+    dustPos[i * 3] =
+      radius *
       Math.sin(phi) *
       Math.cos(theta);
 
-    dustPos[
-      i * 3 + 1
-    ] =
-      rr *
+    dustPos[i * 3 + 1] =
+      radius *
       Math.cos(phi);
 
-    dustPos[
-      i * 3 + 2
-    ] =
-      rr *
+    dustPos[i * 3 + 2] =
+      radius *
       Math.sin(phi) *
       Math.sin(theta);
   }
@@ -1339,33 +1134,35 @@ export function createOrbScene(
     );
 
   dotCanvas.width =
-    dotCanvas.height =
-      32;
+    dotCanvas.height = 64;
 
   const dotCtx =
-    dotCanvas.getContext(
-      "2d",
-    );
+    dotCanvas.getContext("2d");
 
   if (dotCtx) {
     const gradient =
       dotCtx.createRadialGradient(
-        16,
-        16,
+        32,
+        32,
         0,
-        16,
-        16,
-        16,
+        32,
+        32,
+        32,
       );
 
     gradient.addColorStop(
       0,
-      "rgba(255,170,48,1)",
+      "rgba(255,190,90,1)",
     );
 
     gradient.addColorStop(
-      0.3,
-      "rgba(255,120,20,0.45)",
+      0.25,
+      "rgba(255,140,30,0.5)",
+    );
+
+    gradient.addColorStop(
+      0.55,
+      "rgba(180,70,0,0.12)",
     );
 
     gradient.addColorStop(
@@ -1379,8 +1176,8 @@ export function createOrbScene(
     dotCtx.fillRect(
       0,
       0,
-      32,
-      32,
+      64,
+      64,
     );
   }
 
@@ -1389,13 +1186,10 @@ export function createOrbScene(
       dotCanvas,
     );
 
-  const dustMat =
+  const dustMaterial =
     new THREE.PointsMaterial({
       map: dustTexture,
-      size:
-        quality === "performance"
-          ? 0.035
-          : 0.04,
+      size: 0.045,
       transparent: true,
       opacity: 0.45,
       blending:
@@ -1405,49 +1199,43 @@ export function createOrbScene(
       color: C_BRIGHT,
     });
 
-  const dustPoints =
+  const dust =
     new THREE.Points(
       dustGeo,
-      dustMat,
+      dustMaterial,
     );
 
-  orbGroup.add(
-    dustPoints,
-  );
+  orbGroup.add(dust);
 
-  // ─────────────────────────────────────────────
-  // SCAN RINGS
-  // ─────────────────────────────────────────────
+  // =========================================================
+  // SCANNING RINGS
+  // =========================================================
 
-  function makeScanRing(
+  function createScanRing(
     radius: number,
-    thickness: number,
   ) {
-    const geo =
+    const geometry =
       new THREE.RingGeometry(
-        radius -
-          thickness,
-        radius +
-          thickness,
+        radius - 0.012,
+        radius + 0.012,
         96,
       );
 
-    const mat =
+    const material =
       new THREE.MeshBasicMaterial({
         color: C_BRIGHT,
         transparent: true,
         opacity: 0,
         blending:
           THREE.AdditiveBlending,
-        side:
-          THREE.DoubleSide,
+        side: THREE.DoubleSide,
         depthWrite: false,
       });
 
     const mesh =
       new THREE.Mesh(
-        geo,
-        mat,
+        geometry,
+        material,
       );
 
     mesh.rotation.x =
@@ -1457,15 +1245,11 @@ export function createOrbScene(
   }
 
   const scanRing1 =
-    makeScanRing(
-      R1,
-      0.01,
-    );
+    createScanRing(R1);
 
   const scanRing2 =
-    makeScanRing(
+    createScanRing(
       R1 * 0.7,
-      0.008,
     );
 
   orbGroup.add(
@@ -1473,9 +1257,9 @@ export function createOrbScene(
     scanRing2,
   );
 
-  // ─────────────────────────────────────────────
-  // CAMERA CONTROL
-  // ─────────────────────────────────────────────
+  // =========================================================
+  // CAMERA FUNCTIONS
+  // =========================================================
 
   const spherical =
     new THREE.Spherical();
@@ -1502,9 +1286,8 @@ export function createOrbScene(
       THREE.MathUtils.clamp(
         spherical.phi -
           deltaPhi,
-        0.05,
-        Math.PI -
-          0.05,
+        0.02,
+        Math.PI - 0.02,
       );
 
     spherical.makeSafe();
@@ -1513,9 +1296,9 @@ export function createOrbScene(
       spherical,
     );
 
-    camera.position.copy(
-      controls.target,
-    ).add(offset);
+    camera.position
+      .copy(controls.target)
+      .add(offset);
 
     camera.lookAt(
       controls.target,
@@ -1541,9 +1324,13 @@ export function createOrbScene(
       distance,
     );
 
-    camera.position.copy(
+    camera.position
+      .copy(controls.target)
+      .add(offset);
+
+    camera.lookAt(
       controls.target,
-    ).add(offset);
+    );
   }
 
   function resetView() {
@@ -1564,22 +1351,20 @@ export function createOrbScene(
     controls.update();
   }
 
-  // ─────────────────────────────────────────────
+  // =========================================================
   // ANIMATION
-  // ─────────────────────────────────────────────
+  // =========================================================
 
   const clock =
     new THREE.Clock();
 
-  let rafId = 0;
+  let animationId = 0;
   let disposed = false;
-
-  let frameCounter = 0;
 
   function animate() {
     if (disposed) return;
 
-    rafId =
+    animationId =
       requestAnimationFrame(
         animate,
       );
@@ -1587,85 +1372,97 @@ export function createOrbScene(
     const t =
       clock.getElapsedTime();
 
-    // Outer shell.
+    // -------------------------------------------------------
+    // SHELL ROTATION
+    // -------------------------------------------------------
+
     outerShell.rotation.y +=
       0.0012;
 
     outerShell.rotation.x =
-      Math.sin(
-        t * 0.08,
-      ) * 0.045;
+      Math.sin(t * 0.08) *
+      0.045;
 
-    // Inner core.
+    shell2.rotation.y -=
+      0.0008;
+
+    shell2.rotation.z =
+      Math.sin(t * 0.12) *
+      0.025;
+
     innerCore.rotation.y -=
       0.004;
 
     innerCore.rotation.z +=
       0.0015;
 
-    innerCore.rotation.x =
-      Math.cos(
-        t * 0.1,
-      ) * 0.06;
-
-    // Core.
     icoWire.rotation.x +=
       0.006;
 
     icoWire.rotation.y +=
       0.009;
 
+    // -------------------------------------------------------
+    // CORE PULSE
+    // -------------------------------------------------------
+
+    const pulse =
+      Math.sin(t * 1.3);
+
     const wave =
-      Math.sin(
-        t * 1.2,
+      Math.max(
+        0,
+        Math.sin(t * 0.7),
       );
 
     const surge =
-      Math.pow(
-        Math.max(
-          0,
-          Math.sin(
-            t * 0.45,
-          ),
-        ),
-        5,
-      );
+      Math.pow(wave, 5);
 
     const coreScale =
       1 +
-      surge * 1.1 +
-      Math.sin(
-        t * 5,
-      ) *
-        0.03;
+      surge * 1.8 +
+      pulse * 0.025;
 
     coreSphere.scale.setScalar(
       coreScale,
     );
 
-    coreSphereMat.opacity =
-      Math.max(
-        0.03,
-        Math.min(
-          0.45,
-          0.1 +
-            wave *
-              0.035 +
-            surge *
-              0.16,
-        ),
-      );
-
     glowSphere.scale.setScalar(
       1 +
         surge *
-          0.7,
+          1.4,
     );
 
+    outerGlow.scale.setScalar(
+      1 +
+        surge *
+          0.25,
+    );
+
+    coreSphereMat.opacity =
+      THREE.MathUtils.clamp(
+        0.14 +
+          surge * 0.28 +
+          pulse * 0.025,
+        0.04,
+        0.55,
+      );
+
     glowSphereMat.opacity =
-      0.025 +
-      surge *
-        0.055;
+      THREE.MathUtils.clamp(
+        0.045 +
+          surge * 0.11,
+        0.02,
+        0.22,
+      );
+
+    outerGlowMat.opacity =
+      THREE.MathUtils.clamp(
+        0.015 +
+          surge * 0.025,
+        0.008,
+        0.05,
+      );
 
     icoWire.scale.setScalar(
       1 +
@@ -1673,80 +1470,123 @@ export function createOrbScene(
           0.45,
     );
 
-    // Debris.
-    for (
-      let i = 0;
-      i < debris.length;
-      i++
-    ) {
-      const d =
-        debris[i];
+    icoWireMat.opacity =
+      THREE.MathUtils.clamp(
+        0.62 +
+          surge * 0.3,
+        0.4,
+        1,
+      );
 
-      const u =
-        d.userData as DebrisOrbit;
+    // -------------------------------------------------------
+    // DEBRIS
+    // -------------------------------------------------------
 
-      const a =
+    for (const mesh of debris) {
+      const data =
+        mesh.userData as DebrisOrbit;
+
+      const angle =
         t *
-          u.speed +
-        u.phase;
+          data.speed +
+        data.phase;
 
-      d.position.set(
-        u.orbitR *
-          Math.cos(a) *
+      mesh.position.set(
+        data.orbitR *
+          Math.cos(angle) *
           Math.cos(
-            u.tiltX,
+            data.tiltX,
           ),
 
-        u.orbitR *
+        data.orbitR *
             Math.sin(
-              u.tiltX,
+              data.tiltX,
             ) *
             Math.sin(
-              a * 0.8,
+              angle * 0.8,
             ) +
           Math.sin(
-            a * 0.3 +
-              u.tiltZ,
+            angle * 0.3 +
+              data.tiltZ,
           ) *
             0.2,
 
-        u.orbitR *
-          Math.sin(a) *
+        data.orbitR *
+          Math.sin(angle) *
           Math.cos(
-            u.tiltZ,
+            data.tiltZ,
           ),
       );
 
-      d.rotation.x +=
-        0.01;
+      mesh.rotation.x +=
+        0.012;
 
-      d.rotation.z +=
-        0.007;
+      mesh.rotation.z +=
+        0.008;
     }
 
-    // Text drift.
-    updateTextGroup(
-      textOuter,
-      t,
-      1,
-    );
+    // -------------------------------------------------------
+    // TEXT
+    // -------------------------------------------------------
 
-    updateTextGroup(
-      textAmbient,
-      t,
-      1.15,
-    );
+    const textGroups: [
+      THREE.Group,
+      number,
+    ][] = [
+      [textOuter, 1],
+      [textInner, 1.5],
+    ];
 
-    // Scan ring 1.
+    for (const [
+      group,
+      multiplier,
+    ] of textGroups) {
+      for (const child of group.children) {
+        const data =
+          child.userData as SpriteDrift;
+
+        data.theta +=
+          data.speed *
+          multiplier;
+
+        child.position.set(
+          data.r *
+            Math.sin(
+              data.phi,
+            ) *
+            Math.cos(
+              data.theta,
+            ),
+
+          data.r *
+            Math.cos(
+              data.phi,
+            ),
+
+          data.r *
+            Math.sin(
+              data.phi,
+            ) *
+            Math.sin(
+              data.theta,
+            ),
+        );
+      }
+    }
+
+    // -------------------------------------------------------
+    // SCAN RINGS
+    // -------------------------------------------------------
+
     const scanY1 =
       Math.sin(
-        t * 0.4,
+        t * 0.45,
       ) * R1;
 
     scanRing1.position.y =
       scanY1;
 
-    const scanScale1 =
+    const scale1 =
       Math.sqrt(
         Math.max(
           0,
@@ -1757,27 +1597,25 @@ export function createOrbScene(
       ) / R1;
 
     scanRing1.scale.set(
-      scanScale1,
-      scanScale1,
+      scale1,
+      scale1,
       1,
     );
 
     (
       scanRing1.material as THREE.MeshBasicMaterial
     ).opacity =
-      0.18 *
-      scanScale1;
+      0.18 * scale1;
 
-    // Scan ring 2.
     const scanY2 =
       Math.sin(
-        t * 0.6 + 2,
+        t * 0.65 + 2,
       ) * R3;
 
     scanRing2.position.y =
       scanY2;
 
-    const scanScale2 =
+    const scale2 =
       Math.sqrt(
         Math.max(
           0,
@@ -1788,110 +1626,77 @@ export function createOrbScene(
       ) / R3;
 
     scanRing2.scale.set(
-      scanScale2,
-      scanScale2,
+      scale2,
+      scale2,
       1,
     );
 
     (
       scanRing2.material as THREE.MeshBasicMaterial
     ).opacity =
-      0.12 *
-      scanScale2;
+      0.12 * scale2;
 
-    // Dust.
-    dustPoints.rotation.y +=
+    // -------------------------------------------------------
+    // DUST
+    // -------------------------------------------------------
+
+    dust.rotation.y +=
       0.00015;
 
-    // Very occasional panel flicker.
-    // Kept off the main path for most frames.
-    frameCounter++;
+    dust.rotation.x =
+      Math.sin(t * 0.05) *
+      0.03;
 
-    if (
-      frameCounter % 12 ===
-      0
-    ) {
-      bloom.strength =
-        1.45 +
-        Math.sin(
-          t * 0.8,
-        ) *
-          0.2;
-    }
+    // -------------------------------------------------------
+    // BLOOM
+    // -------------------------------------------------------
 
-    chromaticPass.uniforms.uTime.value =
+    bloom.strength =
+      1.35 +
+      Math.sin(t * 0.8) *
+        0.18 +
+      surge * 0.45;
+
+    bloom.radius =
+      0.72;
+
+    glowPass.uniforms.uTime.value =
       t;
 
+    glowPass.uniforms.uGlow.value =
+      0.13 +
+      surge * 0.08;
+
+    // -------------------------------------------------------
+    // CAMERA
+    // -------------------------------------------------------
+
     controls.update();
+
+    // -------------------------------------------------------
+    // RENDER
+    // -------------------------------------------------------
 
     composer.render();
   }
 
   animate();
 
-  // ─────────────────────────────────────────────
-  // TEXT UPDATE
-  // ─────────────────────────────────────────────
-
-  function updateTextGroup(
-    group: THREE.Group,
-    t: number,
-    multiplier: number,
-  ) {
-    for (
-      let i = 0;
-      i < group.children.length;
-      i++
-    ) {
-      const sprite =
-        group.children[i];
-
-      const u =
-        sprite.userData as SpriteDrift;
-
-      u.theta +=
-        u.speed *
-        multiplier;
-
-      sprite.position.set(
-        u.r *
-          Math.sin(u.phi) *
-          Math.cos(
-            u.theta,
-          ),
-
-        u.r *
-          Math.cos(u.phi),
-
-        u.r *
-          Math.sin(u.phi) *
-          Math.sin(
-            u.theta,
-          ),
-      );
-    }
-  }
-
-  // ─────────────────────────────────────────────
+  // =========================================================
   // RESIZE
-  // ─────────────────────────────────────────────
+  // =========================================================
 
-  let resizeTimer =
-    0;
-
-  function resize() {
-    if (disposed) return;
-
+  function onResize() {
     const w =
       Math.max(
-        1,
         container.clientWidth,
+        1,
       );
 
     const h =
       Math.max(
-        1,
         container.clientHeight,
+        1,
       );
 
     camera.aspect =
@@ -1911,38 +1716,14 @@ export function createOrbScene(
     );
   }
 
-  function onResize() {
-    window.clearTimeout(
-      resizeTimer,
-    );
-
-    resizeTimer =
-      window.setTimeout(
-        resize,
-        80,
-      );
-  }
-
   window.addEventListener(
     "resize",
     onResize,
-    {
-      passive: true,
-    },
   );
 
-  const resizeObserver =
-    new ResizeObserver(
-      onResize,
-    );
-
-  resizeObserver.observe(
-    container,
-  );
-
-  // ─────────────────────────────────────────────
+  // =========================================================
   // CLEANUP
-  // ─────────────────────────────────────────────
+  // =========================================================
 
   function dispose() {
     if (disposed) return;
@@ -1950,15 +1731,13 @@ export function createOrbScene(
     disposed = true;
 
     cancelAnimationFrame(
-      rafId,
+      animationId,
     );
 
     window.removeEventListener(
       "resize",
       onResize,
     );
-
-    resizeObserver.disconnect();
 
     controls.dispose();
 
@@ -1967,69 +1746,62 @@ export function createOrbScene(
         const mesh =
           object as THREE.Mesh;
 
-        if (
-          mesh.geometry
-        ) {
+        if (mesh.geometry) {
           mesh.geometry.dispose();
         }
 
-        if (
-          mesh.material
-        ) {
-          const materials =
-            Array.isArray(
-              mesh.material,
-            )
-              ? mesh.material
-              : [
-                  mesh.material,
-                ];
+        const materials =
+          Array.isArray(
+            mesh.material,
+          )
+            ? mesh.material
+            : mesh.material
+              ? [mesh.material]
+              : [];
 
-          for (
-            const material of materials
-          ) {
-            if (!material)
-              continue;
+        for (const material of materials) {
+          if (!material) continue;
 
-            const mat =
-              material as THREE.Material & {
-                map?: THREE.Texture;
-              };
+          const mat =
+            material as THREE.Material & {
+              map?: THREE.Texture;
+              alphaMap?: THREE.Texture;
+              normalMap?: THREE.Texture;
+            };
 
-            mat.map?.dispose();
+          mat.map?.dispose();
+          mat.alphaMap?.dispose();
+          mat.normalMap?.dispose();
 
-            mat.dispose();
-          }
+          material.dispose();
         }
       },
     );
-
-    for (
-      const material of debrisMaterials
-    ) {
-      material.dispose();
-    }
 
     composer.dispose();
 
     renderer.dispose();
 
-    renderer.forceContextLoss();
-
     renderer.domElement.remove();
   }
 
+  // =========================================================
+  // PUBLIC API
+  // =========================================================
+
   return {
     rotateBy,
+
     zoomBy,
 
     zoomIn: () =>
-      zoomBy(0.72),
+      zoomBy(0.55),
 
     zoomOut: () =>
-      zoomBy(1.38),
+      zoomBy(1.8),
 
     resetView,
+
     dispose,
   };
 }
