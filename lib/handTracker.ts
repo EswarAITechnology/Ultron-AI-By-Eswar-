@@ -10,51 +10,65 @@ const WASM_CDN =
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
-// ─────────────────────────────────────────────
-// LANDMARKS
-// ─────────────────────────────────────────────
-
+// MediaPipe landmark indices
 const WRIST = 0;
 const THUMB_TIP = 4;
 const INDEX_TIP = 8;
 const MIDDLE_MCP = 9;
 
+// Other fingertip landmarks.
+// Useful for explicitly tracking all 10 fingertips.
+const FINGER_TIPS = [4, 8, 12, 16, 20];
+
 // ─────────────────────────────────────────────
-// GESTURE TUNING
+// PERFORMANCE
 // ─────────────────────────────────────────────
 
-// Lower = easier to trigger pinch.
+// Rendering can run at 120 FPS independently.
+// Hand inference is adaptive because MediaPipe inference
+// at 120 FPS is unnecessarily expensive on many phones.
+const MIN_DETECTION_INTERVAL = 1000 / 60;
+const MAX_DETECTION_INTERVAL = 1000 / 30;
+
+// Overlay drawing is intentionally cheaper.
+const OVERLAY_INTERVAL = 1000 / 30;
+
+// ─────────────────────────────────────────────
+// PINCH
+// ─────────────────────────────────────────────
+
 const PINCH_ON = 0.30;
-
-// Higher = harder to release pinch.
-// This hysteresis prevents flickering.
 const PINCH_OFF = 0.46;
 
-// Rotation sensitivity.
-const ROTATE_SPEED = 4.8;
+// ─────────────────────────────────────────────
+// MOVEMENT
+// ─────────────────────────────────────────────
 
-// Hand-position smoothing.
-// 0.25 = very smooth
-// 0.50 = responsive
-const POSITION_SMOOTHING = 0.38;
+const ROTATE_SPEED = 5.2;
 
-// Maximum movement applied during one frame.
-// Prevents sudden tracking jumps.
-const MAX_ROTATION_DELTA = 0.12;
+const POSITION_SMOOTHING = 0.32;
 
-// Zoom limits.
-const MIN_ZOOM_FACTOR = 0.88;
-const MAX_ZOOM_FACTOR = 1.14;
+// Prevent one bad MediaPipe frame from causing
+// a giant camera jump.
+const MAX_HAND_DELTA = 0.08;
 
-// Maximum tracking FPS.
-// 30 is usually much smoother on phones than attempting 60 FPS detection.
-const TARGET_TRACKING_FPS = 30;
+// ─────────────────────────────────────────────
+// ZOOM
+// ─────────────────────────────────────────────
+
+const MIN_ZOOM_FACTOR = 0.82;
+const MAX_ZOOM_FACTOR = 1.22;
+
+const MIN_HAND_DISTANCE = 0.025;
 
 // ─────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────
 
-export type GestureMode = "idle" | "spin" | "zoom";
+export type GestureMode =
+  | "idle"
+  | "spin"
+  | "zoom";
 
 export interface TrackerStatus {
   hands: number;
@@ -62,9 +76,18 @@ export interface TrackerStatus {
 }
 
 export interface HandTrackerCallbacks {
-  onRotate(deltaTheta: number, deltaPhi: number): void;
-  onZoom(factor: number): void;
-  onStatus(status: TrackerStatus): void;
+  onRotate(
+    deltaTheta: number,
+    deltaPhi: number,
+  ): void;
+
+  onZoom(
+    factor: number,
+  ): void;
+
+  onStatus(
+    status: TrackerStatus,
+  ): void;
 }
 
 interface Point {
@@ -74,8 +97,13 @@ interface Point {
 
 interface HandState {
   pinching: boolean;
+
   grab: Point;
+
   confidence: number;
+
+  // All five fingertips.
+  fingertips: Point[];
 }
 
 // ─────────────────────────────────────────────
@@ -84,37 +112,48 @@ interface HandState {
 
 export class HandTracker {
   private video: HTMLVideoElement;
+
   private overlay: HTMLCanvasElement;
+
   private callbacks: HandTrackerCallbacks;
 
-  private landmarker: HandLandmarker | null = null;
-  private stream: MediaStream | null = null;
+  private landmarker:
+    | HandLandmarker
+    | null = null;
+
+  private stream:
+    | MediaStream
+    | null = null;
 
   private rafId = 0;
+
   private running = false;
 
   private lastVideoTime = -1;
+
   private lastDetectionTime = 0;
 
-  private readonly detectionInterval =
-    1000 / TARGET_TRACKING_FPS;
+  private lastOverlayTime = 0;
 
-  private handStates = new Map<string, HandState>();
+  private detectionInterval =
+    MIN_DETECTION_INTERVAL;
 
-  private prevMode: GestureMode = "idle";
-  private prevSpinGrab: Point | null = null;
-  private prevZoomDist: number | null = null;
+  private handStates =
+    new Map<string, HandState>();
+
+  private prevMode:
+    GestureMode = "idle";
+
+  private prevSpinGrab:
+    Point | null = null;
+
+  private prevZoomDistance:
+    number | null = null;
 
   private lastStatus: TrackerStatus = {
     hands: 0,
     mode: "idle",
   };
-
-  private lastOverlayDraw = 0;
-
-  // ───────────────────────────────────────────
-  // CONSTRUCTOR
-  // ───────────────────────────────────────────
 
   constructor(
     video: HTMLVideoElement,
@@ -133,67 +172,85 @@ export class HandTracker {
   async start(): Promise<void> {
     if (this.running) return;
 
-    if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error("Camera API unavailable");
+    if (
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices.getUserMedia
+    ) {
+      throw new Error(
+        "Camera API unavailable",
+      );
     }
 
-    // Camera stream.
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: {
-          ideal: 640,
-          max: 1280,
-        },
-        height: {
-          ideal: 480,
-          max: 720,
-        },
-        frameRate: {
-          ideal: 30,
-          max: 30,
-        },
-        facingMode: "user",
-      },
-      audio: false,
-    });
+    this.stream =
+      await navigator.mediaDevices.getUserMedia(
+        {
+          video: {
+            facingMode: "user",
 
-    this.video.srcObject = this.stream;
+            width: {
+              ideal: 1280,
+              max: 1920,
+            },
 
-    // Don't let the video element create unnecessary layout work.
+            height: {
+              ideal: 720,
+              max: 1080,
+            },
+
+            frameRate: {
+              ideal: 60,
+              max: 60,
+            },
+          },
+
+          audio: false,
+        },
+      );
+
+    this.video.srcObject =
+      this.stream;
+
     this.video.muted = true;
+
     this.video.playsInline = true;
 
     await this.video.play();
 
     const fileset =
-      await FilesetResolver.forVisionTasks(WASM_CDN);
+      await FilesetResolver.forVisionTasks(
+        WASM_CDN,
+      );
 
     const commonOptions = {
-      baseOptions: {
-        modelAssetPath: MODEL_URL,
-      },
-
-      runningMode: "VIDEO" as const,
+      runningMode:
+        "VIDEO" as const,
 
       numHands: 2,
 
-      minHandDetectionConfidence: 0.55,
+      minHandDetectionConfidence:
+        0.55,
 
-      minHandPresenceConfidence: 0.55,
+      minHandPresenceConfidence:
+        0.55,
 
-      minTrackingConfidence: 0.55,
+      minTrackingConfidence:
+        0.55,
     };
 
-    // Try GPU first.
+    // GPU first.
     try {
       this.landmarker =
         await HandLandmarker.createFromOptions(
           fileset,
           {
             ...commonOptions,
+
             baseOptions: {
-              ...commonOptions.baseOptions,
-              delegate: "GPU" as const,
+              modelAssetPath:
+                MODEL_URL,
+
+              delegate:
+                "GPU" as const,
             },
           },
         );
@@ -204,9 +261,13 @@ export class HandTracker {
           fileset,
           {
             ...commonOptions,
+
             baseOptions: {
-              ...commonOptions.baseOptions,
-              delegate: "CPU" as const,
+              modelAssetPath:
+                MODEL_URL,
+
+              delegate:
+                "CPU" as const,
             },
           },
         );
@@ -215,7 +276,11 @@ export class HandTracker {
     this.running = true;
 
     this.lastVideoTime = -1;
+
     this.lastDetectionTime = 0;
+
+    this.detectionInterval =
+      MIN_DETECTION_INTERVAL;
 
     this.loop();
   }
@@ -227,7 +292,9 @@ export class HandTracker {
   stop(): void {
     this.running = false;
 
-    cancelAnimationFrame(this.rafId);
+    cancelAnimationFrame(
+      this.rafId,
+    );
 
     this.rafId = 0;
 
@@ -237,29 +304,34 @@ export class HandTracker {
 
     this.stream
       ?.getTracks()
-      .forEach((track) => track.stop());
+      .forEach((track) =>
+        track.stop(),
+      );
 
     this.stream = null;
 
     this.video.pause();
+
     this.video.srcObject = null;
 
     this.handStates.clear();
 
     this.prevMode = "idle";
+
     this.prevSpinGrab = null;
-    this.prevZoomDist = null;
 
-    const ctx = this.overlay.getContext("2d");
+    this.prevZoomDistance =
+      null;
 
-    if (ctx) {
-      ctx.clearRect(
-        0,
-        0,
-        this.overlay.width,
-        this.overlay.height,
-      );
-    }
+    const ctx =
+      this.overlay.getContext("2d");
+
+    ctx?.clearRect(
+      0,
+      0,
+      this.overlay.width,
+      this.overlay.height,
+    );
 
     this.emitStatus({
       hands: 0,
@@ -275,23 +347,30 @@ export class HandTracker {
     if (!this.running) return;
 
     this.rafId =
-      requestAnimationFrame(this.loop);
+      requestAnimationFrame(
+        this.loop,
+      );
 
-    if (!this.landmarker) return;
+    if (!this.landmarker)
+      return;
 
-    if (this.video.readyState < 2) return;
-
-    const now = performance.now();
-
-    // Limit expensive MediaPipe detection.
     if (
-      now - this.lastDetectionTime <
+      this.video.readyState < 2
+    ) {
+      return;
+    }
+
+    const now =
+      performance.now();
+
+    if (
+      now -
+        this.lastDetectionTime <
       this.detectionInterval
     ) {
       return;
     }
 
-    // Don't process identical video frames.
     if (
       this.video.currentTime ===
       this.lastVideoTime
@@ -302,7 +381,8 @@ export class HandTracker {
     this.lastVideoTime =
       this.video.currentTime;
 
-    this.lastDetectionTime = now;
+    const detectionStart =
+      performance.now();
 
     let result;
 
@@ -316,10 +396,40 @@ export class HandTracker {
       return;
     }
 
+    const detectionTime =
+      performance.now() -
+      detectionStart;
+
+    this.lastDetectionTime =
+      now;
+
+    // Adaptive detection.
+    //
+    // If inference becomes expensive,
+    // reduce inference frequency.
+    if (detectionTime > 18) {
+      this.detectionInterval =
+        Math.min(
+          MAX_DETECTION_INTERVAL,
+          this.detectionInterval +
+            4,
+        );
+    } else if (
+      detectionTime < 10
+    ) {
+      this.detectionInterval =
+        Math.max(
+          MIN_DETECTION_INTERVAL,
+          this.detectionInterval -
+            2,
+        );
+    }
+
     const labels =
       result.handedness.map(
         (hand) =>
-          hand[0]?.categoryName ?? "?",
+          hand[0]?.categoryName ??
+          "?",
       );
 
     this.processHands(
@@ -327,13 +437,13 @@ export class HandTracker {
       labels,
     );
 
-    // Draw the preview less frequently than tracking.
-    // This reduces canvas work.
     if (
-      now - this.lastOverlayDraw >
-      1000 / 20
+      now -
+        this.lastOverlayTime >=
+      OVERLAY_INTERVAL
     ) {
-      this.lastOverlayDraw = now;
+      this.lastOverlayTime =
+        now;
 
       this.drawOverlay(
         result.landmarks,
@@ -342,23 +452,33 @@ export class HandTracker {
   };
 
   // ───────────────────────────────────────────
-  // PROCESS HANDS
+  // PROCESS BOTH HANDS
   // ───────────────────────────────────────────
 
   private processHands(
     landmarks: NormalizedLandmark[][],
     labels: string[],
   ): void {
-    const pinchedGrabs: Point[] = [];
+    const pinchedGrabs: Point[] =
+      [];
 
-    const seen = new Set<string>();
+    const seen =
+      new Set<string>();
 
     for (
       let i = 0;
       i < landmarks.length;
       i++
     ) {
-      const lm = landmarks[i];
+      const lm =
+        landmarks[i];
+
+      if (
+        !lm ||
+        lm.length < 21
+      ) {
+        continue;
+      }
 
       const label =
         labels[i] ||
@@ -366,12 +486,8 @@ export class HandTracker {
 
       seen.add(label);
 
-      if (!lm || lm.length <= MIDDLE_MCP) {
-        continue;
-      }
-
       // ─────────────────────────────────────
-      // HAND SCALE
+      // HAND SIZE
       // ─────────────────────────────────────
 
       const handScale =
@@ -380,12 +496,14 @@ export class HandTracker {
           lm[MIDDLE_MCP],
         );
 
-      if (handScale < 0.0001) {
+      if (
+        handScale < 0.0001
+      ) {
         continue;
       }
 
       // ─────────────────────────────────────
-      // PINCH DISTANCE
+      // PINCH
       // ─────────────────────────────────────
 
       const pinchDistance =
@@ -399,10 +517,10 @@ export class HandTracker {
         handScale;
 
       // ─────────────────────────────────────
-      // MIRRORED POSITION
+      // MIRRORED GRAB POINT
       // ─────────────────────────────────────
 
-      const raw: Point = {
+      const rawGrab: Point = {
         x:
           1 -
           (lm[THUMB_TIP].x +
@@ -415,19 +533,38 @@ export class HandTracker {
             2,
       };
 
+      // ─────────────────────────────────────
+      // ALL FIVE FINGERTIPS
+      // ─────────────────────────────────────
+
+      const fingertips =
+        FINGER_TIPS.map(
+          (tipIndex) => ({
+            x:
+              1 -
+              lm[tipIndex].x,
+
+            y:
+              lm[tipIndex].y,
+          }),
+        );
+
       let state =
-        this.handStates.get(label);
+        this.handStates.get(
+          label,
+        );
 
       if (!state) {
         state = {
           pinching: false,
 
           grab: {
-            x: raw.x,
-            y: raw.y,
+            ...rawGrab,
           },
 
           confidence: 0,
+
+          fingertips,
         };
 
         this.handStates.set(
@@ -457,28 +594,44 @@ export class HandTracker {
       }
 
       // ─────────────────────────────────────
-      // POSITION SMOOTHING
+      // SMOOTH GRAB POSITION
       // ─────────────────────────────────────
 
       state.grab.x +=
-        (raw.x - state.grab.x) *
+        (rawGrab.x -
+          state.grab.x) *
         POSITION_SMOOTHING;
 
       state.grab.y +=
-        (raw.y - state.grab.y) *
+        (rawGrab.y -
+          state.grab.y) *
         POSITION_SMOOTHING;
 
-      // Simple confidence estimate.
+      // Smooth all fingertips too.
+      for (
+        let f = 0;
+        f <
+        state.fingertips.length;
+        f++
+      ) {
+        state.fingertips[f].x +=
+          (fingertips[f].x -
+            state.fingertips[f].x) *
+          POSITION_SMOOTHING;
+
+        state.fingertips[f].y +=
+          (fingertips[f].y -
+            state.fingertips[f].y) *
+          POSITION_SMOOTHING;
+      }
+
       state.confidence =
-        Math.max(
+        clamp(
+          1 -
+            pinchRatio *
+              0.15,
           0,
-          Math.min(
-            1,
-            1 -
-              Math.abs(
-                pinchRatio - 0.3,
-              ),
-          ),
+          1,
         );
 
       if (state.pinching) {
@@ -497,12 +650,14 @@ export class HandTracker {
       const key of this.handStates.keys()
     ) {
       if (!seen.has(key)) {
-        this.handStates.delete(key);
+        this.handStates.delete(
+          key,
+        );
       }
     }
 
     // ─────────────────────────────────────────
-    // DETERMINE MODE
+    // MODE
     // ─────────────────────────────────────────
 
     const mode: GestureMode =
@@ -513,25 +668,33 @@ export class HandTracker {
           : "idle";
 
     // ─────────────────────────────────────────
-    // MODE CHANGE
+    // RESET REFERENCES WHEN MODE CHANGES
     // ─────────────────────────────────────────
 
-    if (mode !== this.prevMode) {
-      this.prevSpinGrab = null;
-      this.prevZoomDist = null;
+    if (
+      mode !== this.prevMode
+    ) {
+      this.prevSpinGrab =
+        null;
+
+      this.prevZoomDistance =
+        null;
 
       this.prevMode = mode;
     }
 
     // ─────────────────────────────────────────
-    // SINGLE-HAND SPIN
+    // ONE HAND = 360° ROTATION
     // ─────────────────────────────────────────
 
-    if (mode === "spin") {
+    if (
+      mode === "spin" &&
+      pinchedGrabs[0]
+    ) {
       const grab =
         pinchedGrabs[0];
 
-      if (grab && this.prevSpinGrab) {
+      if (this.prevSpinGrab) {
         let dx =
           grab.x -
           this.prevSpinGrab.x;
@@ -540,23 +703,23 @@ export class HandTracker {
           grab.y -
           this.prevSpinGrab.y;
 
-        // Prevent tracking glitches from
-        // creating giant camera jumps.
         dx = clamp(
           dx,
-          -MAX_ROTATION_DELTA,
-          MAX_ROTATION_DELTA,
+          -MAX_HAND_DELTA,
+          MAX_HAND_DELTA,
         );
 
         dy = clamp(
           dy,
-          -MAX_ROTATION_DELTA,
-          MAX_ROTATION_DELTA,
+          -MAX_HAND_DELTA,
+          MAX_HAND_DELTA,
         );
 
         if (
-          Math.abs(dx) > 0.0005 ||
-          Math.abs(dy) > 0.0005
+          Math.abs(dx) >
+            0.0003 ||
+          Math.abs(dy) >
+            0.0003
         ) {
           this.callbacks.onRotate(
             dx * ROTATE_SPEED,
@@ -565,38 +728,44 @@ export class HandTracker {
         }
       }
 
-      if (grab) {
-        this.prevSpinGrab = {
-          x: grab.x,
-          y: grab.y,
-        };
-      }
+      this.prevSpinGrab = {
+        x: grab.x,
+        y: grab.y,
+      };
     }
 
     // ─────────────────────────────────────────
-    // TWO-HAND ZOOM
+    // TWO HANDS = CONTINUOUS ZOOM
     // ─────────────────────────────────────────
 
-    if (mode === "zoom") {
+    if (
+      mode === "zoom" &&
+      pinchedGrabs.length >= 2
+    ) {
       const a =
         pinchedGrabs[0];
 
       const b =
         pinchedGrabs[1];
 
-      if (a && b) {
-        const distance =
-          Math.hypot(
-            a.x - b.x,
-            a.y - b.y,
-          );
+      const distance =
+        Math.hypot(
+          a.x - b.x,
+          a.y - b.y,
+        );
 
+      if (
+        distance >
+        MIN_HAND_DISTANCE
+      ) {
         if (
-          this.prevZoomDist !== null &&
-          distance > 0.01
+          this.prevZoomDistance !==
+            null &&
+          this.prevZoomDistance >
+            MIN_HAND_DISTANCE
         ) {
           let factor =
-            this.prevZoomDist /
+            this.prevZoomDistance /
             distance;
 
           factor = clamp(
@@ -605,10 +774,10 @@ export class HandTracker {
             MAX_ZOOM_FACTOR,
           );
 
-          // Ignore extremely tiny movements.
           if (
-            Math.abs(factor - 1) >
-            0.003
+            Math.abs(
+              factor - 1,
+            ) > 0.001
           ) {
             this.callbacks.onZoom(
               factor,
@@ -616,7 +785,7 @@ export class HandTracker {
           }
         }
 
-        this.prevZoomDist =
+        this.prevZoomDistance =
           distance;
       }
     }
@@ -626,7 +795,10 @@ export class HandTracker {
     // ─────────────────────────────────────────
 
     this.emitStatus({
-      hands: landmarks.length,
+      hands: Math.min(
+        landmarks.length,
+        2,
+      ),
       mode,
     });
   }
@@ -654,7 +826,7 @@ export class HandTracker {
   }
 
   // ───────────────────────────────────────────
-  // CAMERA OVERLAY
+  // VISUAL OVERLAY
   // ───────────────────────────────────────────
 
   private drawOverlay(
@@ -682,12 +854,38 @@ export class HandTracker {
 
     for (const lm of landmarks) {
       if (
-        lm.length <=
-        INDEX_TIP
+        lm.length < 21
       ) {
         continue;
       }
 
+      // Draw all 10 fingertips.
+      for (
+        const tipIndex of FINGER_TIPS
+      ) {
+        const tip =
+          lm[tipIndex];
+
+        const x =
+          (1 - tip.x) *
+          width;
+
+        const y =
+          tip.y *
+          height;
+
+        ctx.fillStyle =
+          "rgba(255,170,48,0.8)";
+
+        drawDot(
+          ctx,
+          x,
+          y,
+          3,
+        );
+      }
+
+      // Thumb → index pinch line.
       const thumb =
         lm[THUMB_TIP];
 
@@ -723,35 +921,33 @@ export class HandTracker {
               index,
             ) /
             handScale
-          : 999;
+          : Infinity;
 
       const pinched =
         pinchRatio <
         PINCH_ON;
 
-      // ─────────────────────────────────────
-      // PINCH CONNECTION
-      // ─────────────────────────────────────
-
       ctx.strokeStyle =
         pinched
           ? "#ffcc66"
-          : "rgba(255,170,48,0.55)";
+          : "rgba(255,170,48,0.5)";
 
       ctx.lineWidth =
         pinched ? 2 : 1;
 
       ctx.beginPath();
 
-      ctx.moveTo(tx, ty);
+      ctx.moveTo(
+        tx,
+        ty,
+      );
 
-      ctx.lineTo(ix, iy);
+      ctx.lineTo(
+        ix,
+        iy,
+      );
 
       ctx.stroke();
-
-      // ─────────────────────────────────────
-      // FINGERTIP DOTS
-      // ─────────────────────────────────────
 
       ctx.fillStyle =
         pinched
