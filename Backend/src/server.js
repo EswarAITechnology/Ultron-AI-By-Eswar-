@@ -16,23 +16,37 @@ validateEnvironment();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Security
 app.disable("x-powered-by");
-
 app.use(helmet());
 
+// CORS configuration
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "https://eswaraitechnology.github.io",
+  ...(process.env.FRONTEND_ORIGIN || "")
+    .split(",")
+    .map(origin => origin.trim())
+    .filter(Boolean)
+];
+
 app.use(cors({
-  origin: [
-    "https://eswaraitechnology.github.io",
-    ...(process.env.NODE_ENV !== "production"
-      ? ["http://localhost:3000", "http://127.0.0.1:5500"]
-      : [])
-  ],
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("Origin not allowed by CORS"));
+  },
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type"]
 }));
 
+// Request parsing
 app.use(express.json({ limit: "1mb" }));
 
+// API rate limiting
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 30,
@@ -45,6 +59,7 @@ const apiLimiter = rateLimit({
 
 app.use("/api", apiLimiter);
 
+// Root endpoint
 app.get("/", (req, res) => {
   res.json({
     name: "ULTRON AI",
@@ -53,6 +68,7 @@ app.get("/", (req, res) => {
   });
 });
 
+// Backend status
 app.get("/api/status", (req, res) => {
   res.json({
     success: true,
@@ -67,12 +83,15 @@ app.get("/api/status", (req, res) => {
   });
 });
 
+// API routes
 app.use("/api/chat", chatRouter);
 app.use("/api/speech", speechRouter);
 app.use("/api/commands", commandsRouter);
 
+// Error handling
 app.use(errorHandler);
 
+// Start server
 app.listen(PORT, "0.0.0.0", () => {
   console.log("--------------------------------");
   console.log("       ULTRON AI BACKEND");
@@ -82,4 +101,5 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log("Fallback AI: OpenRouter");
   console.log("Voice: Fish Audio");
   console.log("User: Eswar Sir");
+  console.log("--------------------------------");
 });
