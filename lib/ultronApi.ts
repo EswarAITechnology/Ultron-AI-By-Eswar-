@@ -1,6 +1,7 @@
-const API_URL =
+const API_URL = (
   process.env.NEXT_PUBLIC_ULTRON_API_URL ||
-  "http://localhost:3001";
+  "http://localhost:3001"
+).replace(/\/$/, "");
 
 export interface UltronMessage {
   role: "user" | "assistant";
@@ -31,13 +32,17 @@ export async function sendMessage(
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ message, history }),
+    body: JSON.stringify({
+      message,
+      history,
+    }),
+    signal: AbortSignal.timeout(60000),
   });
 
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(data.error || "Ultron request failed");
+    throw new Error(data.error || "Ultron backend error");
   }
 
   return data;
@@ -50,6 +55,7 @@ export async function speak(text: string): Promise<void> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ text }),
+    signal: AbortSignal.timeout(60000),
   });
 
   if (!response.ok) {
@@ -75,37 +81,13 @@ export async function speak(text: string): Promise<void> {
 }
 
 export async function checkUltronStatus() {
-  const response = await fetch(`${API_URL}/api/status`);
+  const response = await fetch(`${API_URL}/api/status`, {
+    signal: AbortSignal.timeout(10000),
+  });
 
   if (!response.ok) {
     throw new Error("Ultron backend unavailable");
   }
 
   return response.json();
-}
-
-export async function processUltronMessage(
-  message: string,
-  history: UltronMessage[] = []
-) {
-  const result = await sendMessage(message, history);
-
-  if (result.providerNotice) {
-    await speak(result.providerNotice);
-  }
-
-  if (result.action?.type === "OPEN_WEBSITE") {
-    window.open(
-      result.action.url,
-      "_blank",
-      "noopener,noreferrer"
-    );
-
-    await speak(result.response);
-    return result;
-  }
-
-  await speak(result.response);
-
-  return result;
 }
