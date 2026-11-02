@@ -1,10 +1,48 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { createOrbScene, type OrbSceneApi } from "@/lib/orbScene";
-import { HandTracker, type TrackerStatus } from "@/lib/handTracker";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
+import {
+  createOrbScene,
+  type OrbSceneApi,
+} from "@/lib/orbScene";
+
+import {
+  HandTracker,
+  type TrackerStatus,
+} from "@/lib/handTracker";
+
+import {
+  sendMessage,
+  speak,
+  type UltronMessage,
+} from "@/lib/ultronApi";
 
 type CameraState = "off" | "starting" | "on" | "error";
+
+type SpeechRecognitionResult = {
+  transcript: string;
+};
+
+type SpeechRecognitionEvent = {
+  results: ArrayLike<ArrayLike<SpeechRecognitionResult>>;
+};
+
+type SpeechRecognitionInstance = {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
 
 const MODE_LABEL: Record<TrackerStatus["mode"], string> = {
   idle: "STANDBY",
@@ -16,15 +54,33 @@ export default function JarvisOrb() {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
+
   const sceneRef = useRef<OrbSceneApi | null>(null);
   const trackerRef = useRef<HandTracker | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
   const [camera, setCamera] = useState<CameraState>("off");
+
   const [status, setStatus] = useState<TrackerStatus>({
     hands: 0,
     mode: "idle",
   });
+
   const [error, setError] = useState<string | null>(null);
+
+  const [messages, setMessages] = useState<UltronMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [provider, setProvider] = useState("Connecting");
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+
+  const messagesRef = useRef<UltronMessage[]>([]);
+  const busyRef = useRef(false);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -37,13 +93,13 @@ export default function JarvisOrb() {
 
       return () => {
         trackerRef.current?.stop();
-        trackerRef.current = null;
+        recognitionRef.current?.stop();
 
         scene.dispose();
         sceneRef.current = null;
       };
     } catch (err) {
-      console.error("Failed to create orb scene:", err);
+      console.error(err);
       setError("3D ENGINE INITIALIZATION FAILED");
     }
   }, []);
@@ -53,10 +109,7 @@ export default function JarvisOrb() {
     trackerRef.current = null;
 
     setCamera("off");
-    setStatus({
-      hands: 0,
-      mode: "idle",
-    });
+    setStatus({ hands: 0, mode: "idle" });
   }, []);
 
   const startGestures = useCallback(async () => {
@@ -86,11 +139,9 @@ export default function JarvisOrb() {
       onRotate: (dt, dp) => {
         sceneRef.current?.rotateBy(dt, dp);
       },
-
       onZoom: (factor) => {
         sceneRef.current?.zoomBy(factor);
       },
-
       onStatus: setStatus,
     });
 
@@ -99,47 +150,18 @@ export default function JarvisOrb() {
     try {
       await tracker.start();
 
-      if (!trackerRef.current) {
+      if (trackerRef.current !== tracker) {
         tracker.stop();
         return;
       }
 
       setCamera("on");
     } catch (err) {
-      console.error("Hand tracking initialization failed:", err);
-
+      console.error(err);
       tracker.stop();
-
-      if (trackerRef.current === tracker) {
-        trackerRef.current = null;
-      }
-
+      trackerRef.current = null;
       setCamera("error");
-
-      if (err instanceof DOMException) {
-        switch (err.name) {
-          case "NotAllowedError":
-            setError("CAMERA ACCESS DENIED");
-            break;
-
-          case "NotFoundError":
-            setError("NO CAMERA FOUND");
-            break;
-
-          case "NotReadableError":
-            setError("CAMERA IS BUSY");
-            break;
-
-          case "SecurityError":
-            setError("CAMERA BLOCKED BY SECURITY POLICY");
-            break;
-
-          default:
-            setError("CAMERA INITIALIZATION FAILED");
-        }
-      } else {
-        setError("TRACKING INIT FAILED");
-      }
+      setError("CAMERA INITIALIZATION FAILED");
     }
   }, [camera]);
 
@@ -153,33 +175,173 @@ export default function JarvisOrb() {
     }
   }, [camera, startGestures, stopGestures]);
 
+  const handleSend = useCallback(async (value?: string) => {
+    const message = (value ?? input).trim();
+
+    if (!message || busyRef.current) return;
+
+    busyRef.current = true;
+    setLoading(true);
+    setInput("");
+    setError(null);
+
+    const previousHistory = messagesRef.current;
+
+    const updatedHistory: UltronMessage[] = [
+      ...previousHistory,
+      { role: "user", content: message },
+    ];
+
+    messagesRef.current = updatedHistory;
+    setMessages(updatedHistory);
+
+    try {
+      const result = await sendMessage(
+        message,
+        previousHistory
+      );
+
+      if (result.provider) {
+        setProvider(
+          result.provider === "gemini"
+            ? "GEMINI"
+            : "OPENROUTER"
+        );
+      }
+
+      if (result.providerNotice) {
+        if (voiceEnabled) {
+          try {
+            await speak(result.providerNotice);
+          } catch (voiceError) {
+            console.error("Announcement failed:", voiceError);
+          }
+        }
+      }
+
+      const reply = result.response;
+
+      const finalHistory: UltronMessage[] = [
+        ...updatedHistory,
+        { role: "assistant", content: reply },
+      ];
+
+      messagesRef.current = finalHistory;
+      setMessages(finalHistory);
+
+      if (result.action?.type === "OPEN_WEBSITE") {
+        window.location.assign(result.action.url);
+        return;
+      }
+
+      if (voiceEnabled) {
+        try {
+          await speak(reply);
+        } catch (voiceError) {
+          console.error("Voice playback failed:", voiceError);
+        }
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Ultron connection failed";
+
+      setError(message);
+    } finally {
+      busyRef.current = false;
+      setLoading(false);
+    }
+  }, [input, voiceEnabled]);
+
+  const startListening = useCallback(() => {
+    if (listening || loading) return;
+
+    const SpeechAPI = (
+      window as Window & {
+        SpeechRecognition?: new () => SpeechRecognitionInstance;
+        webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+      }
+    ).SpeechRecognition || (
+      window as Window & {
+        webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+      }
+    ).webkitSpeechRecognition;
+
+    if (!SpeechAPI) {
+      setError("VOICE INPUT NOT SUPPORTED IN THIS BROWSER");
+      return;
+    }
+
+    const recognition = new SpeechAPI();
+
+    recognition.lang = "en-IN";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0]?.[0]?.transcript;
+
+      if (transcript) {
+        setInput(transcript);
+        void handleSend(transcript);
+      }
+    };
+
+    recognition.onerror = () => {
+      setError("VOICE RECOGNITION FAILED");
+      setListening(false);
+    };
+
+    recognition.onend = () => {
+      setListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = recognition;
+    setListening(true);
+
+    try {
+      recognition.start();
+    } catch {
+      setListening(false);
+      setError("COULD NOT START MICROPHONE");
+    }
+  }, [handleSend, listening, loading]);
+
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setListening(false);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) return;
+
       switch (e.key) {
         case "+":
         case "=":
           sceneRef.current?.zoomIn();
           break;
-
         case "-":
         case "_":
           sceneRef.current?.zoomOut();
           break;
-
         case "r":
         case "R":
           sceneRef.current?.resetView();
           break;
-
         case "g":
         case "G":
           toggleGestures();
           break;
-
         case "Escape":
-          if (trackerRef.current) {
-            stopGestures();
-          }
+          if (trackerRef.current) stopGestures();
+          stopListening();
           break;
       }
     };
@@ -189,7 +351,7 @@ export default function JarvisOrb() {
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [toggleGestures, stopGestures]);
+  }, [toggleGestures, stopGestures, stopListening]);
 
   const cameraOn = camera === "on";
 
@@ -213,16 +375,16 @@ export default function JarvisOrb() {
 
         {cameraOn ? (
           <div>
-            <span className="key">PINCH + MOVE</span> spin&nbsp;&nbsp;
-            <span className="key">
-              PINCH BOTH HANDS ± SPREAD
-            </span>{" "}
-            zoom
+            <span className="key">PINCH + MOVE</span> spin
+            &nbsp;&nbsp;
+            <span className="key">PINCH BOTH HANDS</span> zoom
           </div>
         ) : (
           <div>
-            <span className="key">G</span> hand gestures&nbsp;&nbsp;
-            <span className="key">R</span> reset&nbsp;&nbsp;
+            <span className="key">G</span> gestures
+            &nbsp;&nbsp;
+            <span className="key">R</span> reset
+            &nbsp;&nbsp;
             <span className="key">+/−</span> zoom
           </div>
         )}
@@ -246,18 +408,13 @@ export default function JarvisOrb() {
 
           <div className="camera-status">
             {status.hands > 0
-              ? `${status.hands} HAND${
-                  status.hands > 1 ? "S" : ""
-                } · ${MODE_LABEL[status.mode]}`
+              ? `${status.hands} HAND${status.hands > 1 ? "S" : ""} · ${MODE_LABEL[status.mode]}`
               : "SHOW HANDS"}
           </div>
         </div>
 
         {error && (
-          <div
-            className="hud-error"
-            role="alert"
-          >
+          <div className="hud-error" role="alert">
             {error}
           </div>
         )}
@@ -266,12 +423,11 @@ export default function JarvisOrb() {
           <button
             type="button"
             className="hud-btn"
-            aria-pressed={cameraOn}
             onClick={toggleGestures}
             disabled={camera === "starting"}
           >
             {camera === "starting"
-              ? "INITIALIZING…"
+              ? "INITIALIZING..."
               : cameraOn
                 ? "GESTURES ON"
                 : "GESTURES OFF"}
@@ -283,7 +439,6 @@ export default function JarvisOrb() {
             type="button"
             className="hud-btn"
             onClick={() => sceneRef.current?.zoomIn()}
-            aria-label="Zoom in"
           >
             +
           </button>
@@ -292,7 +447,6 @@ export default function JarvisOrb() {
             type="button"
             className="hud-btn"
             onClick={() => sceneRef.current?.zoomOut()}
-            aria-label="Zoom out"
           >
             −
           </button>
@@ -306,6 +460,88 @@ export default function JarvisOrb() {
           </button>
         </div>
       </div>
+
+      <section className="ultron-chat">
+        <header className="ultron-chat-header">
+          <div>
+            <strong>ULTRON AI</strong>
+            <small>PERSONAL INTELLIGENCE SYSTEM</small>
+          </div>
+
+          <span className="ultron-provider">
+            {provider}
+          </span>
+        </header>
+
+        <div className="ultron-messages" aria-live="polite">
+          {messages.length === 0 && (
+            <div className="ultron-welcome">
+              <strong>Welcome, Eswar Sir.</strong>
+              <p>How may I assist you today?</p>
+            </div>
+          )}
+
+          {messages.map((item, index) => (
+            <div
+              key={index}
+              className={`ultron-message ${item.role}`}
+            >
+              <small>
+                {item.role === "user" ? "YOU" : "ULTRON"}
+              </small>
+              <p>{item.content}</p>
+            </div>
+          ))}
+
+          {loading && (
+            <div className="ultron-thinking">
+              ULTRON IS THINKING...
+            </div>
+          )}
+        </div>
+
+        <form
+          className="ultron-input-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleSend();
+          }}
+        >
+          <button
+            type="button"
+            className="ultron-icon-btn"
+            onClick={() => setVoiceEnabled(v => !v)}
+            aria-label="Toggle voice"
+            title="Toggle voice"
+          >
+            {voiceEnabled ? "VOICE ON" : "VOICE OFF"}
+          </button>
+
+          <input
+            value={input}
+            onChange={event => setInput(event.target.value)}
+            placeholder="Ask Ultron anything..."
+            disabled={loading}
+          />
+
+          <button
+            type="button"
+            className="ultron-icon-btn"
+            onClick={listening ? stopListening : startListening}
+            disabled={loading}
+          >
+            {listening ? "STOP MIC" : "MIC"}
+          </button>
+
+          <button
+            type="submit"
+            className="ultron-send-btn"
+            disabled={loading || !input.trim()}
+          >
+            SEND
+          </button>
+        </form>
+      </section>
     </>
   );
 }
