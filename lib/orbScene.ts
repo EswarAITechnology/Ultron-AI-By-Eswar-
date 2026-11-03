@@ -53,7 +53,7 @@ export function createOrbScene(container: HTMLElement): OrbSceneApi {
 
   // Avoid unnecessarily high GPU load.
   renderer.setPixelRatio(
-    Math.min(window.devicePixelRatio || 1, 1.5),
+    Math.min(window.devicePixelRatio || 1, 1.0),
   );
 
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -80,7 +80,7 @@ export function createOrbScene(container: HTMLElement): OrbSceneApi {
    * Soft bloom creates the blurred neon/orb effect.
    */
   const bloom = new UnrealBloomPass(
-    new THREE.Vector2(width, height),
+    new THREE.Vector2(Math.floor(width / 2), Math.floor(height / 2)),
     1.45,
     0.75,
     0.08,

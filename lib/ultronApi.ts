@@ -6,6 +6,8 @@ const API_URL = (
 export interface UltronMessage {
   role: "user" | "assistant";
   content: string;
+  actionUrl?: string;
+  actionName?: string;
 }
 
 export interface UltronResponse {
@@ -21,6 +23,34 @@ export interface UltronResponse {
     url: string;
     message: string;
   };
+}
+
+export function getStoredFishApiKey(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem("ultron_fish_api_key") || "";
+}
+
+export function setStoredFishApiKey(key: string): void {
+  if (typeof window === "undefined") return;
+  if (key) {
+    localStorage.setItem("ultron_fish_api_key", key.trim());
+  } else {
+    localStorage.removeItem("ultron_fish_api_key");
+  }
+}
+
+export function getStoredFishRefId(): string {
+  if (typeof window === "undefined") return "29c31f6e158c4c8f84c14f9f3d8ba008";
+  return localStorage.getItem("ultron_fish_ref_id") || "29c31f6e158c4c8f84c14f9f3d8ba008";
+}
+
+export function setStoredFishRefId(id: string): void {
+  if (typeof window === "undefined") return;
+  if (id) {
+    localStorage.setItem("ultron_fish_ref_id", id.trim());
+  } else {
+    localStorage.removeItem("ultron_fish_ref_id");
+  }
 }
 
 export async function sendMessage(
@@ -81,7 +111,7 @@ export function cleanTextForSpeech(text: string): string {
 }
 
 /**
- * Authentic J.A.R.V.I.S. (Iron Man) British voice synthesis.
+ * Authentic J.A.R.V.I.S. (Iron Man) British voice synthesis via Web Speech API fallback.
  */
 export function speakWithJarvisSynthesis(text: string): Promise<void> {
   return new Promise((resolve) => {
@@ -135,18 +165,40 @@ export function speakWithJarvisSynthesis(text: string): Promise<void> {
   });
 }
 
-export async function speak(text: string): Promise<void> {
+/**
+ * Primary Voice Synthesizer:
+ * 1. Calls Fish Audio TTS using exact model ID 29c31f6e158c4c8f84c14f9f3d8ba008
+ * 2. If Fish Audio is unavailable, seamlessly falls back to British J.A.R.V.I.S. speech synthesis
+ */
+export async function speak(
+  text: string,
+  customApiKey?: string,
+  customReferenceId?: string
+): Promise<void> {
   const speechText = cleanTextForSpeech(text);
+  if (!speechText) return;
 
-  // Try server Fish Audio if configured
+  const apiKey = (customApiKey || getStoredFishApiKey()).trim();
+  const refId = (customReferenceId || getStoredFishRefId()).trim();
+
+  // Try Fish Audio neural voice synthesis first
   try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (apiKey) {
+      headers["x-fish-api-key"] = apiKey;
+    }
+
     const response = await fetch(`${API_URL}/api/speech/tts`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ text: speechText }),
-      signal: AbortSignal.timeout(25000),
+      headers,
+      body: JSON.stringify({
+        text: speechText,
+        apiKey: apiKey || undefined,
+        referenceId: refId || "29c31f6e158c4c8f84c14f9f3d8ba008",
+      }),
+      signal: AbortSignal.timeout(30000),
     });
 
     if (response.ok) {
@@ -154,21 +206,24 @@ export async function speak(text: string): Promise<void> {
       const audioUrl = URL.createObjectURL(blob);
       const audio = new Audio(audioUrl);
 
-      try {
-        await audio.play();
-        await new Promise<void>((resolve, reject) => {
-          audio.onended = () => resolve();
-          audio.onerror = () => reject(new Error("Playback error"));
-        });
-        return;
-      } finally {
-        URL.revokeObjectURL(audioUrl);
-      }
+      await new Promise<void>((resolve, reject) => {
+        audio.onended = () => {
+          URL.revokeObjectURL(audioUrl);
+          resolve();
+        };
+        audio.onerror = (e) => {
+          URL.revokeObjectURL(audioUrl);
+          reject(e);
+        };
+        audio.play().catch(reject);
+      });
+      return;
     }
-  } catch {
-    // Seamless fallback to client JARVIS voice
+  } catch (fishError) {
+    console.warn("Fish Audio TTS failed or key missing, falling back to local J.A.R.V.I.S. voice:", fishError);
   }
 
+  // Fallback to local high-fidelity British J.A.R.V.I.S. synthesizer
   await speakWithJarvisSynthesis(speechText);
 }
 

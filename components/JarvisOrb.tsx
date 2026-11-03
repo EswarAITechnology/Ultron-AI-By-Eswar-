@@ -20,8 +20,14 @@ import {
 import {
   sendMessage,
   speak,
+  getStoredFishApiKey,
+  setStoredFishApiKey,
+  getStoredFishRefId,
+  setStoredFishRefId,
   type UltronMessage,
 } from "@/lib/ultronApi";
+
+import { detectWebsiteCommand } from "@/lib/commands";
 
 type CameraState = "off" | "starting" | "on" | "error";
 
@@ -80,6 +86,38 @@ export default function JarvisOrb() {
   const [listening, setListening] = useState(false);
   const [provider, setProvider] = useState("Online");
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+
+  // Settings Modal State
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [fishKey, setFishKey] = useState("");
+  const [fishRefId, setFishRefId] = useState("29c31f6e158c4c8f84c14f9f3d8ba008");
+  const [testVoiceLoading, setTestVoiceLoading] = useState(false);
+
+  useEffect(() => {
+    setFishKey(getStoredFishApiKey());
+    setFishRefId(getStoredFishRefId());
+  }, []);
+
+  const handleSaveSettings = () => {
+    setStoredFishApiKey(fishKey);
+    setStoredFishRefId(fishRefId);
+    setIsSettingsOpen(false);
+  };
+
+  const handleTestVoice = async () => {
+    setTestVoiceLoading(true);
+    try {
+      await speak(
+        "Greetings Eswar Sir. All systems are operational. I am ready for your command.",
+        fishKey,
+        fishRefId
+      );
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setTestVoiceLoading(false);
+    }
+  };
 
   // Dynamic Glassy Morphing Chat state (Cursor hover & ball collapse)
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -217,6 +255,41 @@ export default function JarvisOrb() {
 
     const previousHistory = messagesRef.current;
 
+    // 1. Synchronous Client-Side Intent Detection (Bypasses Brave/Chrome Popup Blockers 100%)
+    const directAction = detectWebsiteCommand(message);
+    if (directAction) {
+      try {
+        window.open(directAction.url, "_blank");
+      } catch (openErr) {
+        console.warn("Direct window.open blocked:", openErr);
+      }
+
+      const updatedHistory: UltronMessage[] = [
+        ...previousHistory,
+        { role: "user", content: message },
+        {
+          role: "assistant",
+          content: directAction.message,
+          actionUrl: directAction.url,
+          actionName: directAction.name,
+        },
+      ];
+
+      messagesRef.current = updatedHistory;
+      setMessages(updatedHistory);
+      busyRef.current = false;
+      setLoading(false);
+
+      if (voiceEnabled) {
+        try {
+          await speak(directAction.message);
+        } catch (vErr) {
+          console.error("Voice playback error:", vErr);
+        }
+      }
+      return;
+    }
+
     const updatedHistory: UltronMessage[] = [
       ...previousHistory,
       { role: "user", content: message },
@@ -255,13 +328,18 @@ export default function JarvisOrb() {
 
       const finalHistory: UltronMessage[] = [
         ...updatedHistory,
-        { role: "assistant", content: reply },
+        {
+          role: "assistant",
+          content: reply,
+          actionUrl: result.action?.url,
+          actionName: result.action?.name,
+        },
       ];
 
       messagesRef.current = finalHistory;
       setMessages(finalHistory);
 
-      if (result.action?.type === "OPEN_WEBSITE") {
+      if (result.action?.type === "OPEN_WEBSITE" && result.action.url) {
         window.open(result.action.url, "_blank");
       }
 
@@ -273,18 +351,18 @@ export default function JarvisOrb() {
         }
       }
     } catch (err) {
-      const message =
+      const errMsg =
         err instanceof Error
           ? err.message
           : "Ultron connection failed";
 
-      setError(message);
+      setError(errMsg);
 
       const errorHistory: UltronMessage[] = [
         ...updatedHistory,
         {
           role: "assistant",
-          content: `Notice: ${message}`,
+          content: `Notice: ${errMsg}`,
         },
       ];
       messagesRef.current = errorHistory;
@@ -312,7 +390,7 @@ export default function JarvisOrb() {
     ).webkitSpeechRecognition;
 
     if (!SpeechAPI) {
-      setError("VOICE INPUT NOT SUPPORTED IN THIS BROWSER (PLEASE USE CHROME OR EDGE)");
+      setError("VOICE INPUT: Please use Chrome, Edge, or press Win+H (or Fn) in the chatbox.");
       return;
     }
 
@@ -354,14 +432,14 @@ export default function JarvisOrb() {
         return;
       }
 
-      if (err === "not-allowed" || err === "permission-denied") {
+      if (err === "network" || err === "service-not-allowed") {
+        setError("BRAVE NOTICE: Brave blocks Google Speech by default. In brave://settings/privacy turn ON 'Use Google services for speech recognition', or press Win+H (or Fn) to type directly.");
+      } else if (err === "not-allowed" || err === "permission-denied") {
         setError("MIC ACCESS DENIED: Please allow microphone access in your browser address bar.");
       } else if (err === "audio-capture") {
         setError("NO MICROPHONE DETECTED: Please verify your microphone is connected.");
-      } else if (err === "network") {
-        setError("NETWORK SPEECH NOTICE: Speech recognition service temporarily unreachable.");
       } else {
-        setError("VOICE INPUT TIMED OUT: Click MIC to speak again.");
+        setError("VOICE INPUT NOTICE: Click MIC to try again, or use Win+H / Fn in the chatbox.");
       }
       setListening(false);
     };
@@ -418,6 +496,7 @@ export default function JarvisOrb() {
           stopListening();
           setIsChatOpen(false);
           setIsHovered(false);
+          setIsSettingsOpen(false);
           break;
       }
     };
@@ -435,66 +514,20 @@ export default function JarvisOrb() {
     <>
       <div ref={containerRef} className="orb-root" />
 
-      <div className="overlay-vignette" />
       <div className="overlay-grain" />
       <div className="overlay-scanlines" />
+      <div className="overlay-vignette" />
 
-      <div className="hud hud-title">
-        U.L.T.R.O.N.
-      </div>
+      <div className="hud hud-title">ULTRON // SYSTEM ONLINE</div>
 
       <div className="hud hud-hint">
-        <div>
-          <span className="key">DRAG</span> spin&nbsp;&nbsp;
-          <span className="key">SCROLL</span> zoom
-        </div>
-
-        {cameraOn ? (
-          <div>
-            <span className="key">PINCH + MOVE</span> spin
-            &nbsp;&nbsp;
-            <span className="key">PINCH BOTH HANDS</span> zoom
-          </div>
-        ) : (
-          <div>
-            <span className="key">G</span> gestures
-            &nbsp;&nbsp;
-            <span className="key">R</span> reset
-            &nbsp;&nbsp;
-            <span className="key">+/−</span> zoom
-          </div>
-        )}
+        <span className="key">DRAG</span> ROTATE &nbsp;
+        <span className="key">+/-</span> ZOOM &nbsp;
+        <span className="key">R</span> RESET &nbsp;
+        <span className="key">G</span> GESTURES
       </div>
 
       <div className="hud hud-controls">
-        <div className={`camera-panel${cameraOn ? " visible" : ""}`}>
-          <video
-            ref={videoRef}
-            muted
-            playsInline
-            className="camera-video"
-          />
-
-          <canvas
-            ref={overlayRef}
-            width={208}
-            height={156}
-            className="camera-overlay"
-          />
-
-          <div className="camera-status">
-            {status.hands > 0
-              ? `${status.hands} HAND${status.hands > 1 ? "S" : ""} · ${MODE_LABEL[status.mode]}`
-              : "SHOW HANDS"}
-          </div>
-        </div>
-
-        {error && (
-          <div className="hud-error" role="alert">
-            {error}
-          </div>
-        )}
-
         <div className="hud-row">
           <button
             type="button"
@@ -537,8 +570,93 @@ export default function JarvisOrb() {
           >
             RESET
           </button>
+
+          <button
+            type="button"
+            className="hud-btn"
+            onClick={() => setIsSettingsOpen(true)}
+            title="Voice & API Settings"
+          >
+            ⚙
+          </button>
         </div>
       </div>
+
+      {/* SETTINGS MODAL */}
+      {isSettingsOpen && (
+        <div
+          className="ultron-settings-overlay"
+          onClick={() => setIsSettingsOpen(false)}
+        >
+          <div
+            className="ultron-settings-modal"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="ultron-settings-header">
+              <h3>SYSTEM & VOICE CONFIGURATION</h3>
+              <button
+                type="button"
+                className="ultron-close-btn"
+                onClick={() => setIsSettingsOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="ultron-settings-field">
+              <label>Fish Audio API Key</label>
+              <input
+                type="password"
+                value={fishKey}
+                onChange={e => setFishKey(e.target.value)}
+                placeholder="Enter your Fish Audio API Key"
+              />
+              <p className="ultron-settings-hint">
+                Enables neural J.A.R.V.I.S. speech synthesis via your Fish Audio account.
+              </p>
+            </div>
+
+            <div className="ultron-settings-field">
+              <label>Voice Model Reference ID</label>
+              <input
+                type="text"
+                value={fishRefId}
+                onChange={e => setFishRefId(e.target.value)}
+                placeholder="29c31f6e158c4c8f84c14f9f3d8ba008"
+              />
+              <p className="ultron-settings-hint">
+                Default: 29c31f6e158c4c8f84c14f9f3d8ba008 (Eswar Sir&apos;s custom J.A.R.V.I.S. voice).
+              </p>
+            </div>
+
+            <div className="ultron-settings-field">
+              <label>Brave Browser Voice Typing</label>
+              <p className="ultron-settings-hint">
+                Brave blocks Google speech services by default. You can enable it at{" "}
+                <code style={{ color: "#ffaa30" }}>brave://settings/privacy</code> &rarr; toggle ON &quot;Use Google services for speech recognition&quot;, or press <strong style={{ color: "#ffcc66" }}>Win + H</strong> (or <strong style={{ color: "#ffcc66" }}>Fn</strong>) to dictate directly into the chatbox!
+              </p>
+            </div>
+
+            <div className="ultron-settings-actions">
+              <button
+                type="button"
+                className="ultron-icon-btn"
+                onClick={handleTestVoice}
+                disabled={testVoiceLoading}
+              >
+                {testVoiceLoading ? "TESTING..." : "🔊 TEST VOICE"}
+              </button>
+              <button
+                type="button"
+                className="ultron-send-btn"
+                onClick={handleSaveSettings}
+              >
+                SAVE SETTINGS
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* DYNAMIC TRANSLUCENT GLASSY CHAT / GLOWING MINI ORB BALL */}
       <div
@@ -592,6 +710,22 @@ export default function JarvisOrb() {
             </header>
 
             <div className="ultron-messages" aria-live="polite">
+              {error && (
+                <div
+                  style={{
+                    padding: "8px 12px",
+                    background: "rgba(255, 70, 70, 0.15)",
+                    border: "1px solid rgba(255, 100, 100, 0.4)",
+                    borderRadius: "8px",
+                    color: "#ff8888",
+                    fontSize: "11px",
+                    lineHeight: "1.5",
+                  }}
+                >
+                  {error}
+                </div>
+              )}
+
               {messages.length === 0 && (
                 <div className="ultron-welcome">
                   <strong>Welcome, Eswar Sir.</strong>
@@ -608,6 +742,16 @@ export default function JarvisOrb() {
                     {item.role === "user" ? "YOU" : "ULTRON"}
                   </small>
                   <p>{item.content}</p>
+                  {item.actionUrl && (
+                    <a
+                      href={item.actionUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ultron-action-link"
+                    >
+                      ↗ Open {item.actionName || "Website"}
+                    </a>
+                  )}
                 </div>
               ))}
 
@@ -642,7 +786,7 @@ export default function JarvisOrb() {
                 onChange={event => setInput(event.target.value)}
                 onFocus={() => setIsInputFocused(true)}
                 onBlur={() => setIsInputFocused(false)}
-                placeholder="Ask Ultron anything..."
+                placeholder="Ask Ultron or say 'open hi5 gamer channel'..."
                 disabled={loading}
               />
 
@@ -651,7 +795,7 @@ export default function JarvisOrb() {
                 className="ultron-icon-btn"
                 onClick={listening ? stopListening : startListening}
                 disabled={loading}
-                title="Speech to Text"
+                title="Speech to Text (or press Win+H / Fn)"
               >
                 {listening ? "STOP MIC" : "MIC"}
               </button>
@@ -667,6 +811,17 @@ export default function JarvisOrb() {
           </section>
         )}
       </div>
+
+      <video
+        ref={videoRef}
+        playsInline
+        muted
+        style={{ display: "none" }}
+      />
+      <canvas
+        ref={overlayRef}
+        style={{ display: "none" }}
+      />
     </>
   );
 }
