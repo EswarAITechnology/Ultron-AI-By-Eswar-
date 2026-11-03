@@ -33,12 +33,17 @@ type SpeechRecognitionEvent = {
   results: ArrayLike<ArrayLike<SpeechRecognitionResult>>;
 };
 
+type SpeechRecognitionErrorEvent = {
+  error?: string;
+  message?: string;
+};
+
 type SpeechRecognitionInstance = {
   lang: string;
   continuous: boolean;
   interimResults: boolean;
   onresult: ((event: SpeechRecognitionEvent) => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((event?: SpeechRecognitionErrorEvent) => void) | null;
   onend: (() => void) | null;
   start: () => void;
   stop: () => void;
@@ -341,8 +346,7 @@ export default function JarvisOrb() {
       }
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onerror = (event: any) => {
+    recognition.onerror = (event?: SpeechRecognitionErrorEvent) => {
       const err = event?.error;
       console.warn("Speech recognition notice:", err);
 
