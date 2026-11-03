@@ -13,10 +13,16 @@ export async function askGemini(messages, systemInstruction) {
     parts: [{ text: message.content }]
   }));
 
-  // Candidate models in preference order (gemini-2.0-flash is current best/standard)
-  const preferred = (process.env.GEMINI_MODEL || "gemini-2.0-flash").trim();
+  // Sanitize model name: If it's the deprecated gemini-2.5-flash, upgrade automatically
+  let preferred = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
+  if (preferred === "gemini-2.5-flash" || preferred.includes("2.5")) {
+    preferred = "gemini-3.8-flash";
+  }
+
   const modelsToTry = [
     preferred,
+    "gemini-3.8-flash",
+    "gemini-3.8-pro",
     "gemini-2.0-flash",
     "gemini-1.5-flash",
     "gemini-1.5-pro"

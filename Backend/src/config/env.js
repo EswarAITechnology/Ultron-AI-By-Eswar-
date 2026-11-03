@@ -16,9 +16,9 @@ export function validateEnvironment() {
     );
   }
 
-  // Safe official defaults
-  if (!process.env.GEMINI_MODEL) {
-    process.env.GEMINI_MODEL = "gemini-2.0-flash";
+  // Upgrade deprecated model automatically
+  if (!process.env.GEMINI_MODEL || process.env.GEMINI_MODEL.includes("2.5")) {
+    process.env.GEMINI_MODEL = "gemini-3.8-flash";
   }
 
   if (!process.env.OPENROUTER_MODEL) {
