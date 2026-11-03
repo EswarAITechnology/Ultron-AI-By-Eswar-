@@ -11,17 +11,17 @@ export function validateEnvironment() {
 
   if (missing.length) {
     console.warn(
-      "Missing optional or required API configuration:",
+      "Notice - Missing optional or required API configuration:",
       missing.join(", ")
     );
   }
 
+  // Safe official defaults
   if (!process.env.GEMINI_MODEL) {
-    process.env.GEMINI_MODEL = "gemini-2.5-flash";
+    process.env.GEMINI_MODEL = "gemini-2.0-flash";
   }
 
   if (!process.env.OPENROUTER_MODEL) {
     process.env.OPENROUTER_MODEL = "openai/gpt-4o-mini";
   }
 }
- 

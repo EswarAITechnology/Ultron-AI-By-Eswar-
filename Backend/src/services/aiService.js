@@ -9,27 +9,14 @@ const cooldown = Number(
   process.env.GEMINI_COOLDOWN_MS || 60000
 );
 
-function isTemporaryProviderError(error) {
-  const status = Number(error.status || error.code);
-
-  return (
-    status === 429 ||
-    status === 500 ||
-    status === 502 ||
-    status === 503 ||
-    status === 504 ||
-    /resource_exhausted|rate.?limit|quota exceeded|temporarily unavailable/i
-      .test(error.message || "")
-  );
-}
-
 export async function generateAIResponse(messages) {
   let answer;
   let provider;
   let notice = null;
 
-  const shouldTryGemini =
-    Date.now() >= geminiCooldownUntil;
+  const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY);
+  const hasOpenRouterKey = Boolean(process.env.OPENROUTER_API_KEY);
+  const shouldTryGemini = hasGeminiKey && Date.now() >= geminiCooldownUntil;
 
   if (shouldTryGemini) {
     try {
@@ -42,41 +29,42 @@ export async function generateAIResponse(messages) {
       geminiCooldownUntil = 0;
 
       if (lastProvider === "openrouter") {
-        notice =
-          "Gemini is available again. Switching back to Gemini.";
+        notice = "Gemini is available again. Switching back to Gemini.";
       }
     } catch (error) {
-      if (!isTemporaryProviderError(error)) {
-        throw error;
-      }
-
       geminiCooldownUntil = Date.now() + cooldown;
+      console.warn("Gemini error, attempting fallback:", error.message);
 
-      console.warn(
-        "Gemini temporarily unavailable:",
-        error.message
-      );
-
-      notice =
-        "Gemini is temporarily unavailable. Switching to OpenRouter.";
+      if (hasOpenRouterKey) {
+        notice = "Gemini temporarily unavailable. Switching to OpenRouter.";
+      }
     }
-  } else {
-    notice =
-      "Gemini is in cooldown. Using OpenRouter.";
   }
 
+  // Fallback to OpenRouter if Gemini didn't return an answer
+  if (!answer && hasOpenRouterKey) {
+    try {
+      answer = await askOpenRouter(
+        messages,
+        identity.systemInstruction
+      );
+      provider = "openrouter";
+    } catch (openRouterError) {
+      console.warn("OpenRouter also failed:", openRouterError.message);
+    }
+  }
+
+  // If neither provider succeeded or keys are missing, provide intelligent Ultron response
   if (!answer) {
-    answer = await askOpenRouter(
-      messages,
-      identity.systemInstruction
-    );
-
-    provider = "openrouter";
+    provider = "ultron-core";
+    if (!hasGeminiKey && !hasOpenRouterKey) {
+      answer = "Greetings, Eswar Sir. My interface is active, but I require an AI key to generate responses. Please add your GEMINI_API_KEY to your Render environment variables.";
+    } else {
+      answer = "My apologies, Eswar Sir. The external AI service encountered a temporary rate limit or connection issue. Systems are recalibrating; please try asking again in a moment.";
+    }
   }
 
-  const changed = lastProvider !== null &&
-    lastProvider !== provider;
-
+  const changed = lastProvider !== null && lastProvider !== provider;
   if (changed && !notice) {
     notice = `Switched to ${provider}.`;
   }
@@ -87,7 +75,6 @@ export async function generateAIResponse(messages) {
     answer,
     provider,
     notice,
-    geminiAvailableForRetry:
-      Date.now() >= geminiCooldownUntil
+    geminiAvailableForRetry: Date.now() >= geminiCooldownUntil
   };
 }

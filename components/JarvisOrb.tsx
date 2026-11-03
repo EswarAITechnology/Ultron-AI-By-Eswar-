@@ -58,6 +58,7 @@ export default function JarvisOrb() {
   const sceneRef = useRef<OrbSceneApi | null>(null);
   const trackerRef = useRef<HandTracker | null>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [camera, setCamera] = useState<CameraState>("off");
 
@@ -72,15 +73,38 @@ export default function JarvisOrb() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
-  const [provider, setProvider] = useState("Connecting");
+  const [provider, setProvider] = useState("Online");
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+
+  // Dynamic Glassy Morphing Chat state (Cursor hover & ball collapse)
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleMouseEnter = useCallback(() => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    setIsHovered(true);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    hoverTimeoutRef.current = setTimeout(() => {
+      setIsHovered(false);
+    }, 700);
+  }, []);
+
+  const isExpanded = isHovered || isInputFocused || isChatOpen;
 
   const messagesRef = useRef<UltronMessage[]>([]);
   const busyRef = useRef(false);
 
   useEffect(() => {
     messagesRef.current = messages;
-  }, [messages]);
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -184,6 +208,7 @@ export default function JarvisOrb() {
     setLoading(true);
     setInput("");
     setError(null);
+    setIsChatOpen(true);
 
     const previousHistory = messagesRef.current;
 
@@ -205,7 +230,9 @@ export default function JarvisOrb() {
         setProvider(
           result.provider === "gemini"
             ? "GEMINI"
-            : "OPENROUTER"
+            : result.provider === "openrouter"
+              ? "OPENROUTER"
+              : "ULTRON"
         );
       }
 
@@ -248,6 +275,16 @@ export default function JarvisOrb() {
           : "Ultron connection failed";
 
       setError(message);
+
+      const errorHistory: UltronMessage[] = [
+        ...updatedHistory,
+        {
+          role: "assistant",
+          content: `Notice: ${message}`,
+        },
+      ];
+      messagesRef.current = errorHistory;
+      setMessages(errorHistory);
     } finally {
       busyRef.current = false;
       setLoading(false);
@@ -342,6 +379,8 @@ export default function JarvisOrb() {
         case "Escape":
           if (trackerRef.current) stopGestures();
           stopListening();
+          setIsChatOpen(false);
+          setIsHovered(false);
           break;
       }
     };
@@ -439,6 +478,7 @@ export default function JarvisOrb() {
             type="button"
             className="hud-btn"
             onClick={() => sceneRef.current?.zoomIn()}
+            title="Zoom In"
           >
             +
           </button>
@@ -447,6 +487,7 @@ export default function JarvisOrb() {
             type="button"
             className="hud-btn"
             onClick={() => sceneRef.current?.zoomOut()}
+            title="Zoom Out"
           >
             −
           </button>
@@ -455,93 +496,140 @@ export default function JarvisOrb() {
             type="button"
             className="hud-btn"
             onClick={() => sceneRef.current?.resetView()}
+            title="Reset View"
           >
             RESET
           </button>
         </div>
       </div>
 
-      <section className="ultron-chat">
-        <header className="ultron-chat-header">
-          <div>
-            <strong>ULTRON AI</strong>
-            <small>PERSONAL INTELLIGENCE SYSTEM</small>
-          </div>
+      {/* DYNAMIC TRANSLUCENT GLASSY CHAT / GLOWING MINI ORB BALL */}
+      <div
+        className={`ultron-chat-container ${isExpanded ? "expanded" : "collapsed"}`}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        {!isExpanded ? (
+          <button
+            type="button"
+            className="ultron-ball-trigger"
+            onClick={() => setIsChatOpen(true)}
+            aria-label="Open Ultron AI Chat"
+            title="Move cursor here or click to chat with Ultron"
+          >
+            <div className="ultron-ball-core" />
+            <div className="ultron-ball-ring" />
+            <div className="ultron-ball-ring-outer" />
+            <span className="ultron-ball-icon">✦</span>
+          </button>
+        ) : (
+          <section className="ultron-chat">
+            <header className="ultron-chat-header">
+              <div className="ultron-header-info">
+                <div className="ultron-avatar-dot" />
+                <div>
+                  <strong>ULTRON AI</strong>
+                  <small>HOLOGRAPHIC INTELLIGENCE SYSTEM</small>
+                </div>
+              </div>
 
-          <span className="ultron-provider">
-            {provider}
-          </span>
-        </header>
+              <div className="ultron-header-actions">
+                <span className="ultron-provider">
+                  {provider}
+                </span>
+                <button
+                  type="button"
+                  className="ultron-close-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsChatOpen(false);
+                    setIsHovered(false);
+                    setIsInputFocused(false);
+                  }}
+                  title="Minimize to orb ball"
+                  aria-label="Minimize"
+                >
+                  ✕
+                </button>
+              </div>
+            </header>
 
-        <div className="ultron-messages" aria-live="polite">
-          {messages.length === 0 && (
-            <div className="ultron-welcome">
-              <strong>Welcome, Eswar Sir.</strong>
-              <p>How may I assist you today?</p>
+            <div className="ultron-messages" aria-live="polite">
+              {messages.length === 0 && (
+                <div className="ultron-welcome">
+                  <strong>Welcome, Eswar Sir.</strong>
+                  <p>How may I assist you today?</p>
+                </div>
+              )}
+
+              {messages.map((item, index) => (
+                <div
+                  key={index}
+                  className={`ultron-message ${item.role}`}
+                >
+                  <small>
+                    {item.role === "user" ? "YOU" : "ULTRON"}
+                  </small>
+                  <p>{item.content}</p>
+                </div>
+              ))}
+
+              {loading && (
+                <div className="ultron-thinking">
+                  <span className="pulse-dot" />
+                  ULTRON IS THINKING...
+                </div>
+              )}
+              <div ref={messagesEndRef} />
             </div>
-          )}
 
-          {messages.map((item, index) => (
-            <div
-              key={index}
-              className={`ultron-message ${item.role}`}
+            <form
+              className="ultron-input-row"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleSend();
+              }}
             >
-              <small>
-                {item.role === "user" ? "YOU" : "ULTRON"}
-              </small>
-              <p>{item.content}</p>
-            </div>
-          ))}
+              <button
+                type="button"
+                className="ultron-icon-btn"
+                onClick={() => setVoiceEnabled(v => !v)}
+                aria-label="Toggle voice"
+                title="Toggle voice"
+              >
+                {voiceEnabled ? "VOICE ON" : "VOICE OFF"}
+              </button>
 
-          {loading && (
-            <div className="ultron-thinking">
-              ULTRON IS THINKING...
-            </div>
-          )}
-        </div>
+              <input
+                value={input}
+                onChange={event => setInput(event.target.value)}
+                onFocus={() => setIsInputFocused(true)}
+                onBlur={() => setIsInputFocused(false)}
+                placeholder="Ask Ultron anything..."
+                disabled={loading}
+              />
 
-        <form
-          className="ultron-input-row"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void handleSend();
-          }}
-        >
-          <button
-            type="button"
-            className="ultron-icon-btn"
-            onClick={() => setVoiceEnabled(v => !v)}
-            aria-label="Toggle voice"
-            title="Toggle voice"
-          >
-            {voiceEnabled ? "VOICE ON" : "VOICE OFF"}
-          </button>
+              <button
+                type="button"
+                className="ultron-icon-btn"
+                onClick={listening ? stopListening : startListening}
+                disabled={loading}
+                title="Speech to Text"
+              >
+                {listening ? "STOP MIC" : "MIC"}
+              </button>
 
-          <input
-            value={input}
-            onChange={event => setInput(event.target.value)}
-            placeholder="Ask Ultron anything..."
-            disabled={loading}
-          />
-
-          <button
-            type="button"
-            className="ultron-icon-btn"
-            onClick={listening ? stopListening : startListening}
-            disabled={loading}
-          >
-            {listening ? "STOP MIC" : "MIC"}
-          </button>
-
-          <button
-            type="submit"
-            className="ultron-send-btn"
-            disabled={loading || !input.trim()}
-          >
-            SEND
-          </button>
-        </form>
-      </section>
+              <button
+                type="submit"
+                className="ultron-send-btn"
+                disabled={loading || !input.trim()}
+              >
+                SEND
+              </button>
+            </form>
+          </section>
+        )}
+      </div>
     </>
   );
 }

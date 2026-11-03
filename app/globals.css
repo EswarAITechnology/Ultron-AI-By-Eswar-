@@ -202,7 +202,7 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: scaleX(-1); /* mirror so it behaves like a mirror */
+  transform: scaleX(-1);
   filter: sepia(1) hue-rotate(-15deg) saturate(2.2) brightness(0.75)
     contrast(1.15);
   opacity: 0.85;
@@ -234,172 +234,442 @@ body {
   }
 }
 
-/* ULTRON AI CHAT INTERFACE */
+/* ========================================================= */
+/* DYNAMIC TRANSLUCENT GLASSY CHAT / GLOWING MINI ORB BALL   */
+/* ========================================================= */
 
-.ultron-chat {
+.ultron-chat-container {
   position: fixed;
-  z-index: 20;
+  z-index: 30;
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(680px, calc(100% - 32px));
-  max-height: 42vh;
+  transition: all 0.48s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: width, height, border-radius, box-shadow, transform;
+}
+
+/* --- COLLAPSED STATE: SMALL ROUND GLOWING BALL AT BOTTOM --- */
+.ultron-chat-container.collapsed {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 35%,
+    rgba(255, 190, 90, 0.5),
+    rgba(40, 20, 5, 0.82) 65%,
+    rgba(10, 5, 0, 0.96) 100%
+  );
+  border: 1.5px solid rgba(255, 170, 48, 0.7);
+  box-shadow: 
+    0 0 20px rgba(255, 150, 30, 0.5),
+    inset 0 0 12px rgba(255, 180, 60, 0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: ballHoverPulse 3s infinite ease-in-out;
+}
+
+@keyframes ballHoverPulse {
+  0%, 100% {
+    box-shadow: 0 0 16px rgba(255, 140, 20, 0.45), inset 0 0 10px rgba(255, 170, 48, 0.3);
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    box-shadow: 0 0 28px rgba(255, 170, 48, 0.8), inset 0 0 16px rgba(255, 190, 70, 0.5);
+    transform: translateX(-50%) scale(1.06);
+  }
+}
+
+.ultron-chat-container.collapsed:hover {
+  transform: translateX(-50%) scale(1.14);
+  border-color: rgba(255, 220, 110, 1);
+  box-shadow: 
+    0 0 35px rgba(255, 180, 50, 0.95),
+    inset 0 0 18px rgba(255, 200, 80, 0.6);
+}
+
+.ultron-ball-trigger {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+}
+
+.ultron-ball-core {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffe288 0%, #ff9520 80%);
+  box-shadow: 0 0 14px #ffaa30;
+  animation: coreGlow 2s infinite alternate ease-in-out;
+}
+
+@keyframes coreGlow {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  100% { transform: scale(1.15); opacity: 1; }
+}
+
+.ultron-ball-ring {
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  border: 1px dashed rgba(255, 180, 60, 0.65);
+  animation: ringSpin 8s linear infinite;
+}
+
+.ultron-ball-ring-outer {
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 150, 30, 0.35);
+}
+
+@keyframes ringSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.ultron-ball-icon {
+  position: absolute;
+  color: #ffffff;
+  font-size: 11px;
+  text-shadow: 0 0 6px #ffcc66;
+  pointer-events: none;
+}
+
+/* --- EXPANDED STATE: TRANSLUCENT GLASSY CHATBOX WITH GLOW ANIMATION --- */
+
+.ultron-chat-container.expanded {
+  width: min(620px, calc(100vw - 32px));
+  height: min(440px, 48vh);
+  border-radius: 20px;
+  background: rgba(12, 7, 3, 0.45);
+  border: 1px solid rgba(255, 170, 50, 0.45);
+  backdrop-filter: blur(24px) saturate(190%);
+  -webkit-backdrop-filter: blur(24px) saturate(190%);
+  box-shadow: 
+    0 20px 60px rgba(0, 0, 0, 0.7),
+    0 0 40px rgba(255, 150, 30, 0.35),
+    inset 0 1px 1px rgba(255, 230, 160, 0.4),
+    inset 0 0 25px rgba(255, 140, 20, 0.1);
   display: flex;
   flex-direction: column;
-  color: #f4f6fa;
-  background: rgba(7, 13, 24, 0.91);
-  border: 1px solid rgba(255, 155, 55, 0.32);
-  border-radius: 16px;
-  backdrop-filter: blur(18px);
-  box-shadow: 0 12px 50px rgba(0, 0, 0, 0.45);
   overflow: hidden;
-  font-family: Arial, sans-serif;
+  animation: glowUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes glowUp {
+  0% {
+    opacity: 0.65;
+    transform: translateX(-50%) scale(0.92);
+    box-shadow: 0 0 15px rgba(255, 150, 30, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 50px rgba(255, 180, 50, 0.55), inset 0 0 30px rgba(255, 170, 40, 0.2);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+    box-shadow: 
+      0 20px 60px rgba(0, 0, 0, 0.7),
+      0 0 40px rgba(255, 150, 30, 0.35),
+      inset 0 1px 1px rgba(255, 230, 160, 0.4),
+      inset 0 0 25px rgba(255, 140, 20, 0.1);
+  }
+}
+
+.ultron-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  color: #f5f5f7;
+  font-family: Arial, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  position: relative;
+  overflow: hidden;
 }
 
 .ultron-chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 13px 16px;
-  border-bottom: 1px solid rgba(255,255,255,.1);
+  padding: 12px 18px;
+  border-bottom: 1px solid rgba(255, 170, 50, 0.2);
+  background: rgba(255, 150, 30, 0.05);
 }
 
-.ultron-chat-header strong,
-.ultron-chat-header small {
-  display: block;
+.ultron-header-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ultron-avatar-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ffaa30;
+  box-shadow: 0 0 10px #ffaa30;
+  animation: avatarPulse 2s infinite ease-in-out;
+}
+
+@keyframes avatarPulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.3); opacity: 1; }
 }
 
 .ultron-chat-header strong {
-  color: #ffad54;
+  display: block;
+  color: #ffb66c;
+  font-size: 13px;
   letter-spacing: 2px;
+  text-shadow: 0 0 8px rgba(255, 170, 50, 0.5);
 }
 
 .ultron-chat-header small {
-  color: #8995a8;
+  display: block;
+  color: rgba(255, 255, 255, 0.6);
   font-size: 9px;
-  margin-top: 4px;
-}
-
-.ultron-provider {
-  color: #ffb66c;
-  font-size: 10px;
   letter-spacing: 1px;
 }
 
+.ultron-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ultron-provider {
+  color: #ffaa30;
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 3px 8px;
+  background: rgba(255, 170, 48, 0.12);
+  border: 1px solid rgba(255, 170, 48, 0.35);
+  border-radius: 12px;
+  text-transform: uppercase;
+}
+
+.ultron-close-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.7);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.ultron-close-btn:hover {
+  background: rgba(255, 100, 50, 0.3);
+  border-color: rgba(255, 120, 70, 0.7);
+  color: #ffffff;
+}
+
 .ultron-messages {
+  flex: 1;
   overflow-y: auto;
-  min-height: 90px;
-  padding: 12px 16px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 170, 48, 0.3) transparent;
 }
 
 .ultron-welcome {
   text-align: center;
-  padding: 14px;
+  padding: 24px 16px;
   color: #e8edf6;
+  margin: auto;
 }
 
 .ultron-welcome strong {
-  color: #ffb66c;
+  display: block;
+  font-size: 16px;
+  color: #ffc47d;
+  letter-spacing: 1px;
+  text-shadow: 0 0 10px rgba(255, 180, 60, 0.4);
 }
 
 .ultron-welcome p {
-  color: #9daabe;
+  color: rgba(255, 255, 255, 0.65);
   font-size: 13px;
+  margin-top: 6px;
 }
 
 .ultron-message {
-  max-width: 90%;
-  padding: 9px 12px;
-  margin: 8px 0;
-  border-radius: 10px;
-  background: rgba(255,255,255,.055);
-  overflow-wrap: anywhere;
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  word-break: break-word;
+  animation: fadeInMsg 0.25s ease-out;
+}
+
+@keyframes fadeInMsg {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .ultron-message.user {
-  margin-left: auto;
-  background: rgba(255, 145, 48, .13);
+  align-self: flex-end;
+  background: rgba(255, 150, 30, 0.18);
+  border: 1px solid rgba(255, 170, 50, 0.4);
+  box-shadow: 0 4px 14px rgba(255, 150, 30, 0.1);
+}
+
+.ultron-message.assistant {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 
 .ultron-message small {
-  color: #ffb66c;
+  display: block;
+  color: #ffaa30;
   font-size: 9px;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
+  margin-bottom: 4px;
+  font-weight: bold;
 }
 
 .ultron-message p {
-  margin: 5px 0 0;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #f1f2f6;
   white-space: pre-wrap;
 }
 
 .ultron-thinking {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: #ffb66c;
   font-size: 11px;
-  padding: 10px;
+  letter-spacing: 1px;
+  padding: 8px 12px;
+  background: rgba(255, 170, 48, 0.1);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 170, 48, 0.25);
+}
+
+.pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffaa30;
+  box-shadow: 0 0 8px #ffaa30;
+  animation: pulseDotAnim 1s infinite alternate;
+}
+
+@keyframes pulseDotAnim {
+  0% { transform: scale(0.7); opacity: 0.5; }
+  100% { transform: scale(1.3); opacity: 1; }
 }
 
 .ultron-input-row {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 10px;
-  border-top: 1px solid rgba(255,255,255,.1);
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(255, 170, 50, 0.2);
+  background: rgba(10, 5, 0, 0.3);
 }
 
 .ultron-input-row input {
   flex: 1;
   min-width: 0;
-  padding: 12px;
-  color: white;
-  background: rgba(255,255,255,.07);
-  border: 1px solid rgba(255,255,255,.12);
-  border-radius: 8px;
+  padding: 11px 14px;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 170, 50, 0.35);
+  border-radius: 10px;
+  font-size: 13px;
   outline: none;
+  transition: all 0.2s ease;
 }
 
 .ultron-input-row input:focus {
-  border-color: #ffad54;
+  border-color: #ffaa30;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 14px rgba(255, 170, 48, 0.35);
 }
 
 .ultron-icon-btn,
 .ultron-send-btn {
-  padding: 10px;
-  color: #ffb66c;
-  background: rgba(255, 145, 48, .1);
-  border: 1px solid rgba(255, 145, 48, .3);
-  border-radius: 8px;
+  padding: 10px 14px;
+  color: #ffcc77;
+  background: rgba(255, 150, 30, 0.15);
+  border: 1px solid rgba(255, 170, 50, 0.45);
+  border-radius: 10px;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 11px;
+  letter-spacing: 0.8px;
+  font-weight: bold;
   white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.ultron-icon-btn:hover {
+  background: rgba(255, 160, 40, 0.3);
+  border-color: #ffaa30;
+  box-shadow: 0 0 12px rgba(255, 170, 48, 0.35);
 }
 
 .ultron-send-btn {
-  color: #111827;
-  background: #ffad54;
-  font-weight: bold;
+  color: #0b0702;
+  background: linear-gradient(135deg, #ffc060 0%, #ff9520 100%);
+  border: 1px solid #ffe090;
+  box-shadow: 0 0 14px rgba(255, 150, 30, 0.4);
+}
+
+.ultron-send-btn:hover {
+  background: linear-gradient(135deg, #ffd080 0%, #ffa530 100%);
+  box-shadow: 0 0 22px rgba(255, 170, 50, 0.7);
+  transform: translateY(-1px);
 }
 
 .ultron-icon-btn:disabled,
 .ultron-send-btn:disabled {
-  opacity: .45;
+  opacity: 0.4;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 @media (max-width: 600px) {
-  .ultron-chat {
-    bottom: 10px;
-    max-height: 38vh;
+  .ultron-chat-container.expanded {
+    bottom: 12px;
+    height: min(400px, 46vh);
   }
 
   .ultron-input-row {
-    gap: 4px;
+    gap: 5px;
+    padding: 8px 10px;
   }
 
   .ultron-icon-btn,
   .ultron-send-btn {
-    padding: 9px 6px;
-    font-size: 9px;
+    padding: 8px 8px;
+    font-size: 10px;
   }
 }

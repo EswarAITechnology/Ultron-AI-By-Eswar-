@@ -11,7 +11,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+        value: gemini-2.0-flash
       - key: OPENROUTER_MODEL
         value: openai/gpt-4o-mini
       - key: GEMINI_COOLDOWN_MS
