@@ -17,7 +17,7 @@ services:
       - key: GROK_MODEL
         value: grok-2-latest
       - key: FISH_REFERENCE_ID
-        value: e58b0d70f0a64006b53b85e05452f1e4
+        value: 29c31f6e158c4c8f84c14f9f3d8ba008
       - key: FRONTEND_ORIGIN
         value: https://eswaraitechnology.github.io
       - key: GEMINI_API_KEY

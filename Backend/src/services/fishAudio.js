@@ -16,8 +16,8 @@ export async function generateSpeech(text) {
     "model": process.env.FISH_MODEL || "s2.1-pro-free"
   };
 
-  // Default to the Iron Man JARVIS (Paul Bettany) model ID on fish.audio
-  const jarvisReferenceId = process.env.FISH_REFERENCE_ID || "e58b0d70f0a64006b53b85e05452f1e4";
+  // Default to Eswar Sir's chosen exact Fish Audio JARVIS model ID
+  const jarvisReferenceId = process.env.FISH_REFERENCE_ID || "29c31f6e158c4c8f84c14f9f3d8ba008";
 
   const body = {
     text: speechText,

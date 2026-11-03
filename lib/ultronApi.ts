@@ -27,25 +27,39 @@ export async function sendMessage(
   message: string,
   history: UltronMessage[] = []
 ): Promise<UltronResponse> {
-  const response = await fetch(`${API_URL}/api/chat`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      message,
-      history,
-    }),
-    signal: AbortSignal.timeout(60000),
-  });
+  try {
+    const response = await fetch(`${API_URL}/api/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message,
+        history,
+      }),
+      signal: AbortSignal.timeout(90000),
+    });
 
-  const data = await response.json();
+    const data = await response.json().catch(() => ({}));
 
-  if (!response.ok) {
-    throw new Error(data.error || "Ultron backend error");
+    if (!response.ok) {
+      throw new Error(data.error || "Ultron backend error");
+    }
+
+    return data;
+  } catch (err: unknown) {
+    const errorObj = err as { name?: string; message?: string };
+    if (
+      errorObj?.name === "TimeoutError" ||
+      errorObj?.message?.toLowerCase().includes("timed out") ||
+      errorObj?.message?.toLowerCase().includes("aborted")
+    ) {
+      throw new Error(
+        "Render backend is currently waking up from standby (free-tier cold-start takes ~25-30s). Please send your question again in a moment, Eswar Sir."
+      );
+    }
+    throw err;
   }
-
-  return data;
 }
 
 export function cleanTextForSpeech(text: string): string {
@@ -132,7 +146,7 @@ export async function speak(text: string): Promise<void> {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ text: speechText }),
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(25000),
     });
 
     if (response.ok) {
