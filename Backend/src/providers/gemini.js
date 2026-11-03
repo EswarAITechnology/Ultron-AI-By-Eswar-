@@ -1,28 +1,48 @@
-import { GoogleGenAI } from "@google/genai";
-
 export async function askGemini(messages, systemInstruction) {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  if (!apiKey || !apiKey.trim()) {
     throw new Error("Gemini API key is missing. Please add GEMINI_API_KEY in Render environment variables.");
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  // Build clean history for Gemini REST API
+  const history = [];
+  let lastRole = null;
 
-  const history = messages.slice(-20).map(message => ({
-    role: message.role === "assistant" ? "model" : "user",
-    parts: [{ text: message.content }]
-  }));
+  for (const msg of messages.slice(-14)) {
+    const text = (msg.content || "").trim();
+    if (!text) continue;
 
-  // Sanitize model name: If it's the deprecated gemini-2.5-flash, upgrade automatically
-  let preferred = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
-  if (preferred === "gemini-2.5-flash" || preferred.includes("2.5")) {
-    preferred = "gemini-3.8-flash";
+    const role = msg.role === "assistant" ? "model" : "user";
+    // Gemini requires strictly alternating roles
+    if (role === lastRole) {
+      if (history.length > 0) {
+        history[history.length - 1].parts[0].text += `\n${text}`;
+      }
+    } else {
+      history.push({
+        role,
+        parts: [{ text }]
+      });
+      lastRole = role;
+    }
   }
 
+  // Ensure conversation starts with user message
+  if (history.length > 0 && history[0].role !== "user") {
+    history.shift();
+  }
+
+  // Ensure at least one message is present
+  if (history.length === 0) {
+    history.push({
+      role: "user",
+      parts: [{ text: "Hello" }]
+    });
+  }
+
+  // Valid Gemini models to try in order
   const modelsToTry = [
-    preferred,
-    "gemini-3.8-flash",
-    "gemini-3.8-pro",
+    (process.env.GEMINI_MODEL || "gemini-2.0-flash").replace(/gemini-2\.5-flash|gemini-3\.8-flash|gemini-3\.8-pro/g, "gemini-2.0-flash"),
     "gemini-2.0-flash",
     "gemini-1.5-flash",
     "gemini-1.5-pro"
@@ -32,23 +52,47 @@ export async function askGemini(messages, systemInstruction) {
 
   for (const model of modelsToTry) {
     try {
-      const response = await ai.models.generateContent({
-        model,
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
+      
+      const payload = {
         contents: history,
-        config: {
-          systemInstruction,
+        generationConfig: {
           temperature: 0.7,
           maxOutputTokens: 1200
         }
+      };
+
+      if (systemInstruction) {
+        payload.systemInstruction = {
+          parts: [{ text: systemInstruction }]
+        };
+      }
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(30000)
       });
 
-      const answer = response.text;
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const errorMsg = data?.error?.message || `HTTP ${response.status}`;
+        console.warn(`Gemini model ${model} error: ${errorMsg}`);
+        lastError = new Error(errorMsg);
+        continue;
+      }
+
+      const candidate = data.candidates?.[0];
+      const answer = candidate?.content?.parts?.[0]?.text;
+
       if (answer && answer.trim()) {
         return answer.trim();
       }
     } catch (err) {
       lastError = err;
-      console.warn(`Gemini model ${model} failed, trying next candidate if available:`, err?.message || err);
+      console.warn(`Gemini model ${model} attempt failed:`, err?.message || err);
     }
   }
 

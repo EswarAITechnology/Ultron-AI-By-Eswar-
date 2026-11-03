@@ -98,7 +98,7 @@ export default function JarvisOrb() {
   const handleMouseLeave = useCallback(() => {
     hoverTimeoutRef.current = setTimeout(() => {
       setIsHovered(false);
-    }, 700);
+    }, 250);
   }, []);
 
   const isExpanded = isHovered || isInputFocused || isChatOpen;
@@ -262,8 +262,7 @@ export default function JarvisOrb() {
       setMessages(finalHistory);
 
       if (result.action?.type === "OPEN_WEBSITE") {
-        window.location.assign(result.action.url);
-        return;
+        window.open(result.action.url, "_blank");
       }
 
       if (voiceEnabled) {

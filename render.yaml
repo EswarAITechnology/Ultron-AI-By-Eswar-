@@ -11,14 +11,18 @@ services:
       - key: NODE_ENV
         value: production
       - key: GEMINI_MODEL
-        value: gemini-3.8-flash
+        value: gemini-2.0-flash
       - key: OPENROUTER_MODEL
         value: openai/gpt-4o-mini
-      - key: GEMINI_COOLDOWN_MS
-        value: "60000"
+      - key: GROK_MODEL
+        value: grok-2-latest
+      - key: FISH_REFERENCE_ID
+        value: e58b0d70f0a64006b53b85e05452f1e4
       - key: FRONTEND_ORIGIN
         value: https://eswaraitechnology.github.io
       - key: GEMINI_API_KEY
+        sync: false
+      - key: GROK_API_KEY
         sync: false
       - key: OPENROUTER_API_KEY
         sync: false

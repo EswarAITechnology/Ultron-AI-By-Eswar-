@@ -48,9 +48,12 @@ export async function sendMessage(
   return data;
 }
 
-function cleanTextForSpeech(text: string): string {
+export function cleanTextForSpeech(text: string): string {
   return text
-    // remove code blocks
+    // Phonetic pronunciation fix: ensure "Eswar" is clearly pronounced "Esh-wahr" (not "aswar")
+    .replace(/\bEswar\b/gi, "Esh-wahr")
+    .replace(/\bEswar's\b/gi, "Esh-wahr's")
+    // remove markdown code blocks
     .replace(/```[\s\S]*?```/g, "Code block omitted.")
     // remove inline code
     .replace(/`([^`]+)`/g, "$1")
@@ -58,14 +61,13 @@ function cleanTextForSpeech(text: string): string {
     .replace(/https?:\/\/\S+/g, "link")
     // remove markdown asterisks, hashes, underscores, blockquotes
     .replace(/[*#_~>]/g, "")
-    // collapse multiple spaces and newlines
+    // collapse whitespace
     .replace(/\s+/g, " ")
     .trim();
 }
 
 /**
- * High-fidelity JARVIS (Iron Man) British speech synthesizer using native browser SpeechSynthesis.
- * Modeled after Paul Bettany's calm, sophisticated, resonant British delivery.
+ * Authentic J.A.R.V.I.S. (Iron Man) British voice synthesis.
  */
 export function speakWithJarvisSynthesis(text: string): Promise<void> {
   return new Promise((resolve) => {
@@ -80,7 +82,6 @@ export function speakWithJarvisSynthesis(text: string): Promise<void> {
       return;
     }
 
-    // Cancel any previous pending audio
     window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(clean);
@@ -89,7 +90,6 @@ export function speakWithJarvisSynthesis(text: string): Promise<void> {
       const voices = window.speechSynthesis.getVoices();
       if (!voices || voices.length === 0) return;
 
-      // Match British English male voices that mirror Paul Bettany's JARVIS
       const preferredJarvis =
         voices.find(v =>
           (v.lang.startsWith("en-GB") || v.lang.startsWith("en_GB")) &&
@@ -110,7 +110,6 @@ export function speakWithJarvisSynthesis(text: string): Promise<void> {
       window.speechSynthesis.onvoiceschanged = pickJarvisVoice;
     }
 
-    // JARVIS acoustic profile: measured, articulate British cadence, calm pitch
     utterance.pitch = 0.93;
     utterance.rate = 1.0;
     utterance.volume = 1.0;
@@ -123,14 +122,16 @@ export function speakWithJarvisSynthesis(text: string): Promise<void> {
 }
 
 export async function speak(text: string): Promise<void> {
-  // Always provide immediate, authentic JARVIS voice synthesis
+  const speechText = cleanTextForSpeech(text);
+
+  // Try server Fish Audio if configured
   try {
     const response = await fetch(`${API_URL}/api/speech/tts`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text: speechText }),
       signal: AbortSignal.timeout(8000),
     });
 
@@ -151,11 +152,10 @@ export async function speak(text: string): Promise<void> {
       }
     }
   } catch {
-    // If backend Fish Audio key is absent or fails, seamlessly fall back to JARVIS voice
+    // Seamless fallback to client JARVIS voice
   }
 
-  // Pure Iron Man JARVIS synthesized speech
-  await speakWithJarvisSynthesis(text);
+  await speakWithJarvisSynthesis(speechText);
 }
 
 export async function checkUltronStatus() {
