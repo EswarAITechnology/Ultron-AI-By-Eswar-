@@ -291,8 +291,10 @@ export default function JarvisOrb() {
     }
   }, [input, voiceEnabled]);
 
-  const startListening = useCallback(() => {
+  const startListening = useCallback(async () => {
     if (listening || loading) return;
+
+    setError(null);
 
     const SpeechAPI = (
       window as Window & {
@@ -306,27 +308,58 @@ export default function JarvisOrb() {
     ).webkitSpeechRecognition;
 
     if (!SpeechAPI) {
-      setError("VOICE INPUT NOT SUPPORTED IN THIS BROWSER");
+      setError("VOICE INPUT NOT SUPPORTED IN THIS BROWSER (PLEASE USE CHROME OR EDGE)");
       return;
+    }
+
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(track => track.stop());
+      }
+    } catch (micErr: unknown) {
+      console.warn("Microphone permission notice:", micErr);
+      const errorObj = micErr as { name?: string };
+      if (errorObj?.name === "NotAllowedError" || errorObj?.name === "PermissionDeniedError") {
+        setError("MICROPHONE ACCESS DENIED: Please click the lock or camera icon in your address bar and allow microphone access.");
+        return;
+      }
     }
 
     const recognition = new SpeechAPI();
 
-    recognition.lang = "en-IN";
+    recognition.lang = navigator.language?.startsWith("en") ? navigator.language : "en-US";
     recognition.continuous = false;
     recognition.interimResults = false;
 
-    recognition.onresult = (event) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       const transcript = event.results[0]?.[0]?.transcript;
 
-      if (transcript) {
+      if (transcript && transcript.trim()) {
         setInput(transcript);
         void handleSend(transcript);
       }
     };
 
-    recognition.onerror = () => {
-      setError("VOICE RECOGNITION FAILED");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onerror = (event: any) => {
+      const err = event?.error;
+      console.warn("Speech recognition notice:", err);
+
+      if (err === "no-speech") {
+        setListening(false);
+        return;
+      }
+
+      if (err === "not-allowed" || err === "permission-denied") {
+        setError("MIC ACCESS DENIED: Please allow microphone access in your browser address bar.");
+      } else if (err === "audio-capture") {
+        setError("NO MICROPHONE DETECTED: Please verify your microphone is connected.");
+      } else if (err === "network") {
+        setError("NETWORK SPEECH NOTICE: Speech recognition service temporarily unreachable.");
+      } else {
+        setError("VOICE INPUT TIMED OUT: Click MIC to speak again.");
+      }
       setListening(false);
     };
 
@@ -340,9 +373,10 @@ export default function JarvisOrb() {
 
     try {
       recognition.start();
-    } catch {
+    } catch (startErr) {
+      console.error("Microphone startup failed:", startErr);
       setListening(false);
-      setError("COULD NOT START MICROPHONE");
+      setError("COULD NOT ACTIVATE MICROPHONE");
     }
   }, [handleSend, listening, loading]);
 
