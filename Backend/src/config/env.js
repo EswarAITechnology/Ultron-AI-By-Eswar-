@@ -17,11 +17,11 @@ export function validateEnvironment() {
   }
 
   if (!process.env.GEMINI_MODEL) {
-    throw new Error("GEMINI_MODEL is not configured");
+    process.env.GEMINI_MODEL = "gemini-2.5-flash";
   }
 
   if (!process.env.OPENROUTER_MODEL) {
-    throw new Error("OPENROUTER_MODEL is not configured");
+    process.env.OPENROUTER_MODEL = "openai/gpt-4o-mini";
   }
 }
  

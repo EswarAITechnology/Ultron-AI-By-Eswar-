@@ -33,8 +33,23 @@ const allowedOrigins = [
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin || allowedOrigins.includes("*") || allowedOrigins.includes(origin)) {
       return callback(null, true);
+    }
+
+    try {
+      const parsedUrl = new URL(origin);
+      if (
+        parsedUrl.hostname === "localhost" ||
+        parsedUrl.hostname === "127.0.0.1" ||
+        parsedUrl.hostname.endsWith(".github.io") ||
+        parsedUrl.hostname.endsWith(".onrender.com") ||
+        parsedUrl.hostname.endsWith(".vercel.app")
+      ) {
+        return callback(null, true);
+      }
+    } catch {
+      // ignore URL parsing error
     }
 
     return callback(new Error("Origin not allowed by CORS"));

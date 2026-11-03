@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: ultron-ai-backend
+    runtime: node
+    plan: free
+    rootDir: Backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/status
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: OPENROUTER_MODEL
+        value: openai/gpt-4o-mini
+      - key: GEMINI_COOLDOWN_MS
+        value: "60000"
+      - key: FRONTEND_ORIGIN
+        value: https://eswaraitechnology.github.io
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: FISH_API_KEY
+        sync: false
