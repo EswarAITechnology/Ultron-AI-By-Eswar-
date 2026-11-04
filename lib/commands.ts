@@ -1,11 +1,11 @@
 /**
- * Client-Side Website and Search Command Engine for Ultron AI
+ * Client-Side Universal Action & Website Engine for Ultron AI
  * Engineered for Eswar Sir
  * Synchronously detects commands to bypass Brave/Chrome popup blockers
  */
 
 export interface WebsiteAction {
-  type: "OPEN_WEBSITE";
+  type: "OPEN_WEBSITE" | "TRIGGER_CALL";
   name: string;
   url: string;
   message: string;
@@ -95,6 +95,36 @@ const KNOWN_PLATFORMS = [
     domain: "wikipedia.org",
     homeUrl: "https://www.wikipedia.org",
     keywords: ["wikipedia", "wiki"]
+  },
+  {
+    name: "Amazon",
+    domain: "amazon.in",
+    homeUrl: "https://www.amazon.in",
+    keywords: ["amazon"]
+  },
+  {
+    name: "Flipkart",
+    domain: "flipkart.com",
+    homeUrl: "https://www.flipkart.com",
+    keywords: ["flipkart"]
+  },
+  {
+    name: "Twitch",
+    domain: "twitch.tv",
+    homeUrl: "https://www.twitch.tv",
+    keywords: ["twitch"]
+  },
+  {
+    name: "Discord",
+    domain: "discord.com",
+    homeUrl: "https://discord.com",
+    keywords: ["discord"]
+  },
+  {
+    name: "Canva",
+    domain: "canva.com",
+    homeUrl: "https://canva.com",
+    keywords: ["canva"]
   }
 ];
 
@@ -104,47 +134,55 @@ export function detectWebsiteCommand(rawText: string): WebsiteAction | null {
   const text = rawText.trim();
   const lower = text.toLowerCase();
 
+  // 1. PHONE CALL INTENT: "call ultron", "phone call", "call me", "start call"
+  if (/^(call\s+(?:ultron(?:\s+ai)?|me)|phone\s+call|start\s+(?:phone\s+)?call|dial\s+ultron)$/i.test(lower)) {
+    return {
+      type: "TRIGGER_CALL",
+      name: "Ultron AI Phone Call",
+      url: "",
+      message: "Initiating secure holographic phone link, Eswar Sir. Ultron Online Sir! How may I assist you today?"
+    };
+  }
+
   // If it's a conversational question, let the AI answer instead of opening websites
   const isQuestion =
     /^(who|what|why|how|when|where|which|is|are|can you|could you|tell me|explain)\b/i.test(lower) ||
     lower.endsWith("?");
 
-  const hasActionVerb = /^(open|launch|visit|go to|take me to|search|play|watch|google)\b/i.test(lower);
+  const hasActionVerb = /^(open|launch|visit|go to|take me to|search|play|watch|google|find)\b/i.test(lower);
   if (isQuestion && !hasActionVerb) {
     return null;
   }
 
-  // 1. YOUTUBE CHANNEL & SEARCH PATTERNS (e.g. "open hi5 gamer channel", "open hi5 gamer youtube channel", "open youtube and open hi5 gamer channel")
-  const ytChannelPatterns = [
-    /^open\s+youtube\s+and\s+(?:open|search|play|go to|watch)?\s*(.+)$/i,
-    /^open\s+(.+?)\s+(?:youtube\s+channel|yt\s+channel|channel)$/i,
-    /^open\s+(?:youtube\s+channel|yt\s+channel|channel)\s+(?:of\s+)?(.+)$/i,
-    /^(?:play|watch|search)\s+(.+?)\s+on\s+(?:youtube|yt)$/i,
-    /^open\s+(?:youtube|yt)\s+(?:for\s+)?(.+)$/i,
-    /^(.+?)\s+(?:youtube\s+channel|yt\s+channel)$/i
-  ];
+  // 2. UNIVERSAL YOUTUBE CHANNELS & VIDEOS (Matches ANY channel or video title)
+  const ytChannelMatch =
+    lower.match(/^open\s+(?:youtube\s+and\s+(?:open|search|play|go to|watch)?\s*)?(.+?)\s+(?:youtube\s+channel|yt\s+channel|channel)$/i) ||
+    lower.match(/^open\s+(?:youtube\s+channel|yt\s+channel|channel)\s+(?:of\s+)?(.+)$/i) ||
+    lower.match(/^(?:play|watch)\s+(?:video\s+(?:of\s+)?)?(.+?)\s+on\s+(?:youtube|yt)$/i) ||
+    lower.match(/^(?:play|watch)\s+(?:song\s+)?(.+)$/i) ||
+    lower.match(/^open\s+(.+?)\s+on\s+(?:youtube|yt)$/i) ||
+    lower.match(/^search\s+(.+?)\s+on\s+(?:youtube|yt)$/i) ||
+    lower.match(/^open\s+(?:youtube|yt)\s+(?:for\s+)?(.+)$/i) ||
+    lower.match(/^(.+?)\s+(?:youtube\s+channel|yt\s+channel)$/i);
 
-  for (const pattern of ytChannelPatterns) {
-    const match = lower.match(pattern);
-    if (match && match[1]) {
-      let query = match[1].trim();
-      query = query
-        .replace(/^(channel|youtube|yt|for|video|of)\s+/i, "")
-        .replace(/\s+(channel|youtube|yt|videos?)$/i, "")
-        .trim();
+  if (ytChannelMatch && ytChannelMatch[1]) {
+    let query = ytChannelMatch[1].trim();
+    query = query
+      .replace(/^(channel|youtube|yt|for|video|of|and|song|watch)\s+/i, "")
+      .replace(/\s+(channel|youtube|yt|videos?|songs?)$/i, "")
+      .trim();
 
-      if (query && query !== "youtube" && query !== "yt") {
-        return {
-          type: "OPEN_WEBSITE",
-          name: `${query} (YouTube)`,
-          url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
-          message: `Opening ${query} on YouTube, Eswar Sir. What should I do now?`
-        };
-      }
+    if (query && query !== "youtube" && query !== "yt") {
+      return {
+        type: "OPEN_WEBSITE",
+        name: `${query} (YouTube)`,
+        url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
+        message: `Opening ${query} on YouTube, Eswar Sir. What should I do now?`
+      };
     }
   }
 
-  // 2. YOUTUBE EXACT HOMEPAGE
+  // 3. YOUTUBE EXACT HOMEPAGE
   if (/^(open|launch|visit|go to)\s+(?:youtube|yt)$/i.test(lower) || lower === "youtube") {
     return {
       type: "OPEN_WEBSITE",
@@ -154,7 +192,7 @@ export function detectWebsiteCommand(rawText: string): WebsiteAction | null {
     };
   }
 
-  // 3. INSTAGRAM PROFILES & HOMEPAGE
+  // 4. INSTAGRAM PROFILES & HOMEPAGE
   const instaProfileMatch =
     lower.match(/^open\s+instagram\s+(?:profile\s+)?(?:of\s+)?([a-z0-9_.]+)$/i) ||
     lower.match(/^open\s+([a-z0-9_.]+)\s+on\s+instagram$/i);
@@ -177,7 +215,7 @@ export function detectWebsiteCommand(rawText: string): WebsiteAction | null {
     };
   }
 
-  // 4. SPOTIFY SONGS & PLAYLISTS
+  // 5. SPOTIFY SONGS & PLAYLISTS
   const spotifyMatch =
     lower.match(/^(?:play|search)\s+(.+?)\s+on\s+spotify$/i) ||
     lower.match(/^open\s+spotify\s+(?:for\s+)?(.+)$/i);
@@ -191,7 +229,7 @@ export function detectWebsiteCommand(rawText: string): WebsiteAction | null {
     };
   }
 
-  // 5. GOOGLE SEARCH EXPLICIT
+  // 6. GOOGLE SEARCH EXPLICIT
   const googleSearchMatch =
     lower.match(/^(?:search|google)\s+(.+?)\s+on\s+google$/i) ||
     lower.match(/^open\s+google\s+and\s+(?:search\s+)?(.+)$/i) ||
@@ -209,7 +247,21 @@ export function detectWebsiteCommand(rawText: string): WebsiteAction | null {
     }
   }
 
-  // 6. KNOWN PLATFORMS BY KEYWORD
+  // 7. GITHUB
+  const githubMatch =
+    lower.match(/^open\s+github\s+(?:for\s+)?(.+)$/i) ||
+    lower.match(/^search\s+(.+?)\s+on\s+github$/i);
+  if (githubMatch && githubMatch[1] && githubMatch[1] !== "github") {
+    const query = githubMatch[1].trim();
+    return {
+      type: "OPEN_WEBSITE",
+      name: `${query} (GitHub)`,
+      url: `https://github.com/search?q=${encodeURIComponent(query)}`,
+      message: `Searching GitHub for '${query}', Eswar Sir. What should I do now?`
+    };
+  }
+
+  // 8. KNOWN PLATFORMS BY KEYWORD
   for (const platform of KNOWN_PLATFORMS) {
     for (const kw of platform.keywords) {
       const regex = new RegExp(`^(open|launch|visit|go to)\\s+${kw}$`, "i");
@@ -224,8 +276,8 @@ export function detectWebsiteCommand(rawText: string): WebsiteAction | null {
     }
   }
 
-  // 7. SPECIFIC URL OR DOMAIN
-  const domainMatch = lower.match(/\b([a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|in|dev|ai|app|co|xyz|edu|gov))\b/i);
+  // 9. SPECIFIC URL OR DOMAIN
+  const domainMatch = lower.match(/\b([a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|in|dev|ai|app|co|xyz|edu|gov|tv|ru))\b/i);
   if (domainMatch && hasActionVerb) {
     const domain = domainMatch[1];
     return {
@@ -236,32 +288,11 @@ export function detectWebsiteCommand(rawText: string): WebsiteAction | null {
     };
   }
 
-  // 8. FALLBACK GENERAL "OPEN <NAME>"
+  // 10. FALLBACK GENERAL "OPEN <NAME>"
   const genericOpenMatch = lower.match(/^(?:open|launch|visit|go to)\s+(.+)$/i);
   if (genericOpenMatch && genericOpenMatch[1]) {
     const target = genericOpenMatch[1].trim();
-    if (target.length > 1 && !target.includes("chat") && !target.includes("conversation") && !target.includes("mode")) {
-      const cleanTarget = target.replace(/[^a-z0-9]/g, "");
-      const popularSites: Record<string, string> = {
-        facebook: "https://www.facebook.com",
-        amazon: "https://www.amazon.in",
-        flipkart: "https://www.flipkart.com",
-        twitch: "https://www.twitch.tv",
-        cricbuzz: "https://www.cricbuzz.com",
-        linkedin: "https://www.linkedin.com",
-        pinterest: "https://www.pinterest.com",
-        brave: "https://search.brave.com"
-      };
-
-      if (popularSites[cleanTarget]) {
-        return {
-          type: "OPEN_WEBSITE",
-          name: target,
-          url: popularSites[cleanTarget],
-          message: `Opening ${target}, Eswar Sir. What should I do now?`
-        };
-      }
-
+    if (target.length > 1 && !target.includes("chat") && !target.includes("mode")) {
       return {
         type: "OPEN_WEBSITE",
         name: target,

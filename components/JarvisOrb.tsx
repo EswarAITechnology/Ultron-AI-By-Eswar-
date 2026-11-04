@@ -29,6 +29,7 @@ import {
 } from "@/lib/ultronApi";
 
 import { detectWebsiteCommand } from "@/lib/commands";
+import UltronCallScreen from "./UltronCallScreen";
 
 type CameraState = "off" | "starting" | "on" | "error";
 
@@ -91,6 +92,9 @@ export default function JarvisOrb() {
   const [provider, setProvider] = useState("Online");
   const [voiceEnabled, setVoiceEnabled] = useState(true);
 
+  // Phone Call Screen State
+  const [isCallOpen, setIsCallOpen] = useState(false);
+
   // Settings Modal State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [fishKey, setFishKey] = useState("");
@@ -100,6 +104,9 @@ export default function JarvisOrb() {
   useEffect(() => {
     setFishKey(getStoredFishApiKey());
     setFishRefId(getStoredFishRefId());
+    if (typeof window !== "undefined" && window.location.search.includes("call=true")) {
+      setIsCallOpen(true);
+    }
   }, []);
 
   const handleSaveSettings = () => {
@@ -262,6 +269,13 @@ export default function JarvisOrb() {
     // 1. Synchronous Client-Side Intent Detection (Bypasses Brave/Chrome Popup Blockers 100%)
     const directAction = detectWebsiteCommand(message);
     if (directAction) {
+      if (directAction.type === "TRIGGER_CALL") {
+        setIsCallOpen(true);
+        busyRef.current = false;
+        setLoading(false);
+        return;
+      }
+
       try {
         window.open(directAction.url, "_blank");
       } catch (openErr) {
@@ -541,12 +555,17 @@ export default function JarvisOrb() {
         case "G":
           toggleGestures();
           break;
+        case "c":
+        case "C":
+          setIsCallOpen(prev => !prev);
+          break;
         case "Escape":
           if (trackerRef.current) stopGestures();
           stopListening();
           setIsChatOpen(false);
           setIsHovered(false);
           setIsSettingsOpen(false);
+          setIsCallOpen(false);
           break;
       }
     };
@@ -630,7 +649,28 @@ export default function JarvisOrb() {
             ⚙
           </button>
         </div>
+
+        <div className="hud-row">
+          <button
+            type="button"
+            className="hud-btn"
+            onClick={() => setIsCallOpen(true)}
+            title="Start Holographic Phone Call with Ultron AI"
+            style={{ color: "#34d399", borderColor: "rgba(52, 211, 153, 0.6)" }}
+          >
+            📞 CALL
+          </button>
+        </div>
       </div>
+
+      {/* HOLOGRAPHIC PHONE CALL OVERLAY */}
+      {isCallOpen && (
+        <UltronCallScreen
+          onHangup={() => setIsCallOpen(false)}
+          callerName="Ultron AI"
+          phoneNumber="+1 (833) ULTRON-AI"
+        />
+      )}
 
       {/* SETTINGS MODAL */}
       {isSettingsOpen && (

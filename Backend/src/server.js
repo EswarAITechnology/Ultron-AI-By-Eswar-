@@ -7,6 +7,7 @@ import rateLimit from "express-rate-limit";
 import chatRouter from "./routes/chat.js";
 import speechRouter from "./routes/speech.js";
 import commandsRouter from "./routes/commands.js";
+import voiceRouter from "./routes/voice.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { validateEnvironment } from "./config/env.js";
 
@@ -55,16 +56,17 @@ app.use(cors({
     return callback(new Error("Origin not allowed by CORS"));
   },
   methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type"]
+  allowedHeaders: ["Content-Type", "x-fish-api-key"]
 }));
 
-// Request parsing
-app.use(express.json({ limit: "1mb" }));
+// Request parsing: JSON & Twilio form-encoded
+app.use(express.json({ limit: "5mb" }));
+app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
 // API rate limiting
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: 30,
+  limit: 60,
   standardHeaders: "draft-7",
   legacyHeaders: false,
   message: {
@@ -102,6 +104,7 @@ app.get("/api/status", (req, res) => {
 app.use("/api/chat", chatRouter);
 app.use("/api/speech", speechRouter);
 app.use("/api/commands", commandsRouter);
+app.use("/api/voice", voiceRouter);
 
 // Error handling
 app.use(errorHandler);
@@ -114,7 +117,7 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
   console.log("Primary AI: Gemini");
   console.log("Fallback AI: OpenRouter");
-  console.log("Voice: Fish Audio");
+  console.log("Voice: Fish Audio & Twilio");
   console.log("User: Eswar Sir");
   console.log("--------------------------------");
 });

@@ -789,3 +789,290 @@ body {
     font-size: 10px;
   }
 }
+
+/* =========================================
+   HOLOGRAPHIC PHONE CALL OVERLAY
+========================================= */
+.ultron-call-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: radial-gradient(circle at center, rgba(30, 14, 4, 0.94) 0%, rgba(5, 2, 0, 0.98) 100%);
+  backdrop-filter: blur(20px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-family: "Courier New", monospace;
+  animation: callFadeIn 0.3s ease;
+}
+
+@keyframes callFadeIn {
+  from { opacity: 0; transform: scale(1.04); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.ultron-call-container {
+  width: min(440px, 94vw);
+  height: min(680px, 92vh);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 32px 24px;
+  background: rgba(18, 10, 3, 0.7);
+  border: 1px solid rgba(255, 170, 48, 0.4);
+  border-radius: 28px;
+  box-shadow: 0 0 50px rgba(255, 140, 20, 0.25), inset 0 0 30px rgba(255, 140, 20, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.ultron-call-satellite {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: #ffaa30;
+  opacity: 0.8;
+}
+
+.ultron-call-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 8px #34d399;
+  animation: livePulse 1.2s infinite;
+}
+
+@keyframes livePulse {
+  0% { transform: scale(0.8); opacity: 0.6; }
+  50% { transform: scale(1.4); opacity: 1; }
+  100% { transform: scale(0.8); opacity: 0.6; }
+}
+
+.ultron-call-avatar-wrapper {
+  position: relative;
+  width: 140px;
+  height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.ultron-call-avatar-core {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffe080 0%, #ff8800 65%, #662200 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 30px rgba(255, 170, 48, 0.9);
+  z-index: 2;
+}
+
+.ultron-call-core-icon {
+  font-size: 28px;
+  color: #1a0800;
+  font-weight: bold;
+}
+
+.ultron-call-avatar-ring {
+  position: absolute;
+  inset: 12px;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 170, 48, 0.7);
+  animation: rotateRing 14s linear infinite;
+}
+
+.ultron-call-avatar-ring.active-speaking {
+  border-color: #ffcc66;
+  animation: rotateRing 4s linear infinite, pulseRing 1s infinite alternate;
+}
+
+@keyframes pulseRing {
+  from { transform: scale(0.95); opacity: 0.6; }
+  to { transform: scale(1.15); opacity: 1; }
+}
+
+.ultron-call-avatar-ring-outer {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 170, 48, 0.3);
+  animation: rotateRingRev 22s linear infinite;
+}
+
+@keyframes rotateRingRev {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+.ultron-call-info {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.ultron-call-name {
+  font-size: 26px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  color: #ffe6aa;
+  text-shadow: 0 0 16px rgba(255, 170, 48, 0.6);
+}
+
+.ultron-call-number {
+  font-size: 13px;
+  letter-spacing: 2px;
+  color: #ffaa30;
+  opacity: 0.85;
+}
+
+.ultron-call-status {
+  margin-top: 4px;
+}
+
+.ultron-call-timer {
+  font-size: 15px;
+  letter-spacing: 2px;
+  color: #4ade80;
+  font-weight: bold;
+}
+
+.ultron-call-state-text {
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: #fca5a5;
+  animation: blinkCall 1.2s infinite;
+}
+
+@keyframes blinkCall {
+  50% { opacity: 0.4; }
+}
+
+.ultron-call-last-speech {
+  font-size: 12px;
+  color: #ffdf99;
+  max-width: 320px;
+  line-height: 1.4;
+  font-style: italic;
+  margin-top: 6px;
+}
+
+/* Waveform */
+.ultron-call-waveform {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  margin: 16px 0;
+}
+
+.waveform-bar {
+  width: 4px;
+  height: 10px;
+  background: rgba(255, 170, 48, 0.4);
+  border-radius: 4px;
+  transition: height 0.15s ease;
+}
+
+.waveform-bar.speaking {
+  background: #ffcc66;
+  box-shadow: 0 0 10px #ffaa30;
+  animation: waveAnim 0.7s infinite alternate ease-in-out;
+}
+
+.bar-1 { animation-delay: 0.1s; }
+.bar-2 { animation-delay: 0.3s; }
+.bar-3 { animation-delay: 0.5s; }
+.bar-4 { animation-delay: 0.2s; }
+.bar-5 { animation-delay: 0.6s; }
+.bar-6 { animation-delay: 0.4s; }
+.bar-7 { animation-delay: 0.25s; }
+.bar-8 { animation-delay: 0.45s; }
+
+@keyframes waveAnim {
+  0% { height: 8px; }
+  100% { height: 36px; }
+}
+
+/* Call Controls */
+.ultron-call-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.ultron-call-action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 170, 48, 0.12);
+  border: 1px solid rgba(255, 170, 48, 0.4);
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  justify-content: center;
+  cursor: pointer;
+  color: #ffe6aa;
+  transition: all 0.2s ease;
+}
+
+.ultron-call-action-btn:hover {
+  background: rgba(255, 170, 48, 0.25);
+  box-shadow: 0 0 16px rgba(255, 170, 48, 0.4);
+  transform: translateY(-2px);
+}
+
+.ultron-call-action-btn.active {
+  background: rgba(255, 100, 100, 0.25);
+  border-color: #f87171;
+  color: #f87171;
+}
+
+.action-icon {
+  font-size: 20px;
+}
+
+.action-label {
+  font-size: 8px;
+  letter-spacing: 1px;
+}
+
+.ultron-call-hangup-btn {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+  border: 2px solid #fca5a5;
+  box-shadow: 0 0 24px rgba(239, 68, 68, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ultron-call-hangup-btn:hover {
+  background: linear-gradient(135deg, #f87171 0%, #dc2626 100%);
+  box-shadow: 0 0 34px rgba(239, 68, 68, 0.9);
+  transform: scale(1.08);
+}
+
+.hangup-icon {
+  font-size: 24px;
+  color: #fff;
+  font-weight: bold;
+}
