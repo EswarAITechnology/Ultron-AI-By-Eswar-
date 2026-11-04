@@ -92,10 +92,12 @@ app.get("/api/status", (req, res) => {
     assistant: "Ultron",
     status: "online",
     user: "Eswar Sir",
+    phone: process.env.ULTRON_PHONE_NUMBER || null,
     providers: {
       gemini: Boolean(process.env.GEMINI_API_KEY),
       openrouter: Boolean(process.env.OPENROUTER_API_KEY),
-      fishAudio: Boolean(process.env.FISH_API_KEY)
+      fishAudio: Boolean(process.env.FISH_API_KEY),
+      voiceWebhook: true
     }
   });
 });

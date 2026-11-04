@@ -5,7 +5,7 @@
  */
 
 export interface WebsiteAction {
-  type: "OPEN_WEBSITE" | "TRIGGER_CALL";
+  type: "OPEN_WEBSITE";
   name: string;
   url: string;
   message: string;
@@ -133,16 +133,6 @@ export function detectWebsiteCommand(rawText: string): WebsiteAction | null {
 
   const text = rawText.trim();
   const lower = text.toLowerCase();
-
-  // 1. PHONE CALL INTENT: "call ultron", "phone call", "call me", "start call"
-  if (/^(call\s+(?:ultron(?:\s+ai)?|me)|phone\s+call|start\s+(?:phone\s+)?call|dial\s+ultron)$/i.test(lower)) {
-    return {
-      type: "TRIGGER_CALL",
-      name: "Ultron AI Phone Call",
-      url: "",
-      message: "Initiating secure holographic phone link, Eswar Sir. Ultron Online Sir! How may I assist you today?"
-    };
-  }
 
   // If it's a conversational question, let the AI answer instead of opening websites
   const isQuestion =

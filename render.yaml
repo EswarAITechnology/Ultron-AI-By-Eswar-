@@ -28,3 +28,5 @@ services:
         sync: false
       - key: FISH_API_KEY
         sync: false
+      - key: ULTRON_PHONE_NUMBER
+        sync: false

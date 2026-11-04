@@ -127,16 +127,6 @@ export function detectWebsiteCommand(rawText) {
   const text = rawText.trim();
   const lower = text.toLowerCase();
 
-  // 1. PHONE CALL INTENT: "call ultron", "phone call", "call me", "start call"
-  if (/^(call\s+(?:ultron(?:\s+ai)?|me)|phone\s+call|start\s+(?:phone\s+)?call|dial\s+ultron)$/i.test(lower)) {
-    return {
-      type: "TRIGGER_CALL",
-      name: "Ultron AI Phone Call",
-      url: "",
-      message: "Initiating secure holographic phone link, Eswar Sir. Ultron Online Sir! How may I assist you today?"
-    };
-  }
-
   // If it's a conversational question, let AI handle it unless explicitly asking to open/search
   const isQuestion =
     /^(who|what|why|how|when|where|which|is|are|can you|could you|tell me|explain)\b/i.test(lower) ||
