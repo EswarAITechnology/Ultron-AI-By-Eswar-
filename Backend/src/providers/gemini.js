@@ -98,3 +98,54 @@ export async function askGemini(messages, systemInstruction) {
 
   throw lastError || new Error("Gemini returned an empty response");
 }
+
+export async function transcribeAudioWithGemini(audioBase64, mimeType = "audio/webm") {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || !apiKey.trim()) {
+    throw new Error("Gemini API key is required for direct audio transcription.");
+  }
+
+  const cleanMime = (mimeType || "audio/webm").split(";")[0];
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey.trim()}`;
+
+  const payload = {
+    contents: [
+      {
+        parts: [
+          {
+            inlineData: {
+              mimeType: cleanMime,
+              data: audioBase64
+            }
+          },
+          {
+            text: "Transcribe the spoken audio exactly. Only return the transcript in plain text without any introductory comments or quotes."
+          }
+        ]
+      }
+    ],
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 500
+    }
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(25000)
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const errorMsg = data?.error?.message || `HTTP ${response.status}`;
+    throw new Error(`Audio transcription error: ${errorMsg}`);
+  }
+
+  const candidate = data.candidates?.[0];
+  const text = candidate?.content?.parts?.[0]?.text;
+
+  return (text || "").trim();
+}

@@ -20,6 +20,7 @@ import {
 import {
   sendMessage,
   speak,
+  transcribeAudio,
   getStoredFishApiKey,
   setStoredFishApiKey,
   getStoredFishRefId,
@@ -69,6 +70,9 @@ export default function JarvisOrb() {
   const sceneRef = useRef<OrbSceneApi | null>(null);
   const trackerRef = useRef<HandTracker | null>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const hasWebSpeechResultRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [camera, setCamera] = useState<CameraState>("off");
@@ -377,7 +381,71 @@ export default function JarvisOrb() {
     if (listening || loading) return;
 
     setError(null);
+    hasWebSpeechResultRef.current = false;
+    audioChunksRef.current = [];
 
+    let micStream: MediaStream | null = null;
+
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+    } catch (micErr: unknown) {
+      console.warn("Microphone permission notice:", micErr);
+      const errorObj = micErr as { name?: string };
+      if (errorObj?.name === "NotAllowedError" || errorObj?.name === "PermissionDeniedError") {
+        setError("MICROPHONE ACCESS DENIED: Please allow microphone access in your browser address bar.");
+        return;
+      }
+    }
+
+    if (!micStream) {
+      setError("NO MICROPHONE DETECTED: Please verify your microphone is connected.");
+      return;
+    }
+
+    // 1. Native MediaRecorder for 100% Brave / Chrome / Edge compatibility
+    try {
+      const recorder = new MediaRecorder(micStream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        micStream?.getTracks().forEach(track => track.stop());
+
+        if (hasWebSpeechResultRef.current) return;
+
+        const chunks = audioChunksRef.current;
+        if (chunks.length === 0) return;
+
+        const audioBlob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        if (audioBlob.size < 1200) return;
+
+        setLoading(true);
+        try {
+          const transcript = await transcribeAudio(audioBlob);
+          if (transcript && transcript.trim()) {
+            setInput(transcript);
+            void handleSend(transcript);
+          }
+        } catch (transcribeError) {
+          console.warn("MediaRecorder STT fallback:", transcribeError);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      recorder.start();
+    } catch (recErr) {
+      console.warn("MediaRecorder start notice:", recErr);
+    }
+
+    // 2. Parallel Web Speech API for instant streaming in Chrome/Edge
     const SpeechAPI = (
       window as Window & {
         SpeechRecognition?: new () => SpeechRecognitionInstance;
@@ -389,81 +457,63 @@ export default function JarvisOrb() {
       }
     ).webkitSpeechRecognition;
 
-    if (!SpeechAPI) {
-      setError("VOICE INPUT: Please use Chrome, Edge, or press Win+H (or Fn) in the chatbox.");
-      return;
+    if (SpeechAPI) {
+      try {
+        const recognition = new SpeechAPI();
+        recognition.lang = navigator.language?.startsWith("en") ? navigator.language : "en-US";
+        recognition.continuous = false;
+        recognition.interimResults = false;
+
+        recognition.onresult = (event: SpeechRecognitionEvent) => {
+          const transcript = event.results[0]?.[0]?.transcript;
+          if (transcript && transcript.trim()) {
+            hasWebSpeechResultRef.current = true;
+            setInput(transcript);
+            void handleSend(transcript);
+            stopListening();
+          }
+        };
+
+        recognition.onerror = () => {
+          // In Brave, SpeechAPI fails with network error because Brave disables Google Speech.
+          // MediaRecorder seamlessly captures and transcribes via Gemini STT!
+        };
+
+        recognition.onend = () => {
+          if (!hasWebSpeechResultRef.current && listening) {
+            stopListening();
+          }
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+      } catch (speechErr) {
+        console.warn("WebSpeech API start notice:", speechErr);
+      }
     }
 
-    try {
-      if (navigator.mediaDevices?.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach(track => track.stop());
-      }
-    } catch (micErr: unknown) {
-      console.warn("Microphone permission notice:", micErr);
-      const errorObj = micErr as { name?: string };
-      if (errorObj?.name === "NotAllowedError" || errorObj?.name === "PermissionDeniedError") {
-        setError("MICROPHONE ACCESS DENIED: Please click the lock or camera icon in your address bar and allow microphone access.");
-        return;
-      }
-    }
-
-    const recognition = new SpeechAPI();
-
-    recognition.lang = navigator.language?.startsWith("en") ? navigator.language : "en-US";
-    recognition.continuous = false;
-    recognition.interimResults = false;
-
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const transcript = event.results[0]?.[0]?.transcript;
-
-      if (transcript && transcript.trim()) {
-        setInput(transcript);
-        void handleSend(transcript);
-      }
-    };
-
-    recognition.onerror = (event?: SpeechRecognitionErrorEvent) => {
-      const err = event?.error;
-      console.warn("Speech recognition notice:", err);
-
-      if (err === "no-speech") {
-        setListening(false);
-        return;
-      }
-
-      if (err === "network" || err === "service-not-allowed") {
-        setError("BRAVE NOTICE: Brave blocks Google Speech by default. In brave://settings/privacy turn ON 'Use Google services for speech recognition', or press Win+H (or Fn) to type directly.");
-      } else if (err === "not-allowed" || err === "permission-denied") {
-        setError("MIC ACCESS DENIED: Please allow microphone access in your browser address bar.");
-      } else if (err === "audio-capture") {
-        setError("NO MICROPHONE DETECTED: Please verify your microphone is connected.");
-      } else {
-        setError("VOICE INPUT NOTICE: Click MIC to try again, or use Win+H / Fn in the chatbox.");
-      }
-      setListening(false);
-    };
-
-    recognition.onend = () => {
-      setListening(false);
-      recognitionRef.current = null;
-    };
-
-    recognitionRef.current = recognition;
     setListening(true);
-
-    try {
-      recognition.start();
-    } catch (startErr) {
-      console.error("Microphone startup failed:", startErr);
-      setListening(false);
-      setError("COULD NOT ACTIVATE MICROPHONE");
-    }
   }, [handleSend, listening, loading]);
 
   const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
-    recognitionRef.current = null;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (stopErr) {
+        console.warn("MediaRecorder stop notice:", stopErr);
+      }
+      mediaRecorderRef.current = null;
+    }
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (recStopErr) {
+        console.warn("Recognition stop notice:", recStopErr);
+      }
+      recognitionRef.current = null;
+    }
+
     setListening(false);
   }, []);
 

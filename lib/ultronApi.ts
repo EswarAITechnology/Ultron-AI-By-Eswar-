@@ -227,6 +227,44 @@ export async function speak(
   await speakWithJarvisSynthesis(speechText);
 }
 
+/**
+ * Direct Audio Transcription via Gemini 2.0 Flash
+ * Works 100% in Brave, Chrome, Edge, Firefox, and Safari using native MediaRecorder
+ */
+export async function transcribeAudio(audioBlob: Blob): Promise<string> {
+  const reader = new FileReader();
+  const base64Promise = new Promise<string>((resolve, reject) => {
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      const base64String = dataUrl.split(",")[1];
+      resolve(base64String);
+    };
+    reader.onerror = reject;
+  });
+  reader.readAsDataURL(audioBlob);
+  const base64Audio = await base64Promise;
+
+  const response = await fetch(`${API_URL}/api/speech/stt`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      audio: base64Audio,
+      mimeType: audioBlob.type || "audio/webm",
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.error || "Speech transcription failed");
+  }
+
+  return (data.transcript || "").trim();
+}
+
 export async function checkUltronStatus() {
   const response = await fetch(`${API_URL}/api/status`, {
     signal: AbortSignal.timeout(10000),
