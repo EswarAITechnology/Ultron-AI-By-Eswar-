@@ -876,7 +876,7 @@ export default function JarvisOrb() {
                 onChange={event => setInput(event.target.value)}
                 onFocus={() => setIsInputFocused(true)}
                 onBlur={() => setIsInputFocused(false)}
-                placeholder="Ask Ultron or say 'open hi5 gamer channel'..."
+                placeholder="Ask Ultron"
                 disabled={loading}
               />
 

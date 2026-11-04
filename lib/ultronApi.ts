@@ -110,8 +110,38 @@ export function cleanTextForSpeech(text: string): string {
     .trim();
 }
 
+let lockedJarvisVoice: SpeechSynthesisVoice | null = null;
+
+function getLockedJarvisVoice(): SpeechSynthesisVoice | null {
+  if (lockedJarvisVoice) return lockedJarvisVoice;
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return null;
+
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices || voices.length === 0) return null;
+
+  lockedJarvisVoice =
+    voices.find(v =>
+      (v.lang.startsWith("en-GB") || v.lang.startsWith("en_GB")) &&
+      /george|ryan|oliver|daniel|arthur|male/i.test(v.name)
+    ) ||
+    voices.find(v => /google.*uk.*male|uk english male/i.test(v.name)) ||
+    voices.find(v => v.lang.startsWith("en-GB") || v.lang.startsWith("en_GB")) ||
+    voices.find(v => v.lang.startsWith("en") && /male|guy|david/i.test(v.name)) ||
+    voices.find(v => v.lang.startsWith("en")) ||
+    null;
+
+  return lockedJarvisVoice;
+}
+
+if (typeof window !== "undefined" && "speechSynthesis" in window) {
+  window.speechSynthesis.onvoiceschanged = () => {
+    getLockedJarvisVoice();
+  };
+}
+
 /**
  * Authentic J.A.R.V.I.S. (Iron Man) British voice synthesis via Web Speech API fallback.
+ * Strictly maintains consistent voice across all questions.
  */
 export function speakWithJarvisSynthesis(text: string): Promise<void> {
   return new Promise((resolve) => {
@@ -130,28 +160,9 @@ export function speakWithJarvisSynthesis(text: string): Promise<void> {
 
     const utterance = new SpeechSynthesisUtterance(clean);
 
-    const pickJarvisVoice = () => {
-      const voices = window.speechSynthesis.getVoices();
-      if (!voices || voices.length === 0) return;
-
-      const preferredJarvis =
-        voices.find(v =>
-          (v.lang.startsWith("en-GB") || v.lang.startsWith("en_GB")) &&
-          /george|ryan|oliver|daniel|arthur|male/i.test(v.name)
-        ) ||
-        voices.find(v => /google.*uk.*male|uk english male/i.test(v.name)) ||
-        voices.find(v => v.lang.startsWith("en-GB") || v.lang.startsWith("en_GB")) ||
-        voices.find(v => v.lang.startsWith("en") && /male|guy|david/i.test(v.name)) ||
-        voices.find(v => v.lang.startsWith("en"));
-
-      if (preferredJarvis) {
-        utterance.voice = preferredJarvis;
-      }
-    };
-
-    pickJarvisVoice();
-    if (window.speechSynthesis.onvoiceschanged !== undefined) {
-      window.speechSynthesis.onvoiceschanged = pickJarvisVoice;
+    const voice = getLockedJarvisVoice();
+    if (voice) {
+      utterance.voice = voice;
     }
 
     utterance.pitch = 0.93;

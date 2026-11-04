@@ -26,20 +26,24 @@ export default function UltronCallScreen({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const isListeningRef = useRef(false);
+  const callEndedRef = useRef(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Play realistic phone ringing sound using Web Audio API
   const playRingtone = useCallback(() => {
     try {
-      const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const audioCtx = new (
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      )();
       const osc1 = audioCtx.createOscillator();
       const osc2 = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
 
       osc1.type = "sine";
       osc2.type = "sine";
-      osc1.frequency.setValueAtTime(440, audioCtx.currentTime); // 440 Hz
-      osc2.frequency.setValueAtTime(480, audioCtx.currentTime); // 480 Hz
+      osc1.frequency.setValueAtTime(440, audioCtx.currentTime);
+      osc2.frequency.setValueAtTime(480, audioCtx.currentTime);
 
       gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.8);
@@ -53,13 +57,13 @@ export default function UltronCallScreen({
       osc1.stop(audioCtx.currentTime + 1.8);
       osc2.stop(audioCtx.currentTime + 1.8);
     } catch {
-      // AudioContext not allowed before user interaction
+      // AudioContext not permitted before interaction
     }
   }, []);
 
   // Continuous speech loop during active call
   const startRecordingLoop = useCallback(async () => {
-    if (callState === "ended" || isListeningRef.current) return;
+    if (callEndedRef.current || isListeningRef.current) return;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -79,7 +83,7 @@ export default function UltronCallScreen({
         isListeningRef.current = false;
 
         const chunks = audioChunksRef.current;
-        if (chunks.length === 0 || callState === "ended") return;
+        if (chunks.length === 0 || callEndedRef.current) return;
 
         const audioBlob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
         if (audioBlob.size > 1500) {
@@ -105,7 +109,7 @@ export default function UltronCallScreen({
         }
 
         // Restart recording loop if call is still active
-        if (callState !== "ended") {
+        if (!callEndedRef.current) {
           setTimeout(() => {
             void startRecordingLoop();
           }, 400);
@@ -124,7 +128,7 @@ export default function UltronCallScreen({
     } catch (err) {
       console.warn("Call mic access:", err);
     }
-  }, [callState]);
+  }, []);
 
   // Handle call initiation sequence
   useEffect(() => {
@@ -167,6 +171,7 @@ export default function UltronCallScreen({
   }, [callState]);
 
   const handleEndCall = () => {
+    callEndedRef.current = true;
     setCallState("ended");
     setStatusText("CALL ENDED");
 
