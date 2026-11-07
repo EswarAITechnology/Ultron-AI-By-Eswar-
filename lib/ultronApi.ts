@@ -287,3 +287,63 @@ export async function checkUltronStatus() {
 
   return response.json();
 }
+
+export interface DialResult {
+  success: boolean;
+  callId?: string;
+  number?: string;
+  country?: string;
+  provider?: string;
+  status?: string;
+  message?: string;
+  error?: string;
+}
+
+/**
+ * Initiates an outbound phone call via the backend caller gateway.
+ * Runs 100% in the backend in secret without opening tabs or windows.
+ */
+export async function dialCall(phoneNumber: string): Promise<DialResult> {
+  try {
+    const response = await fetch(`${API_URL}/api/voice/dial`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ phoneNumber }),
+      signal: AbortSignal.timeout(20000),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.error || "Call dispatch failed");
+    }
+
+    return data;
+  } catch (err: unknown) {
+    const errorObj = err as { message?: string };
+    return {
+      success: false,
+      error: errorObj?.message || "Failed to initiate background call",
+    };
+  }
+}
+
+/**
+ * Terminates the active call in secret via the backend.
+ */
+export async function hangupCall(callId?: string | null): Promise<void> {
+  try {
+    await fetch(`${API_URL}/api/voice/hangup`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ callId }),
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch (err) {
+    console.warn("Hangup request error:", err);
+  }
+}

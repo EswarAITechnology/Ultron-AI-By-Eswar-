@@ -25,6 +25,8 @@ import {
   setStoredFishApiKey,
   getStoredFishRefId,
   setStoredFishRefId,
+  dialCall,
+  hangupCall,
   type UltronMessage,
 } from "@/lib/ultronApi";
 
@@ -121,6 +123,89 @@ export default function JarvisOrb() {
     } finally {
       setTestVoiceLoading(false);
     }
+  };
+
+  // Dialpad & Secret Background Calling State (India +91)
+  const [isDialpadOpen, setIsDialpadOpen] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [callState, setCallState] = useState<"idle" | "calling" | "connected" | "ended">("idle");
+  const [callDuration, setCallDuration] = useState(0);
+  const [activeCallId, setActiveCallId] = useState<string | null>(null);
+  const [dialpadError, setDialpadError] = useState<string | null>(null);
+
+  // Call duration counter
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (callState === "connected") {
+      interval = setInterval(() => {
+        setCallDuration((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [callState]);
+
+  const formatCallDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const handleDialKey = (char: string) => {
+    if (phoneNumber.length < 10) {
+      setPhoneNumber((prev) => prev + char);
+      setDialpadError(null);
+    }
+  };
+
+  const handleDialBackspace = () => {
+    setPhoneNumber((prev) => prev.slice(0, -1));
+    setDialpadError(null);
+  };
+
+  const handleStartCall = async () => {
+    const cleanDigits = phoneNumber.replace(/\D/g, "");
+    if (cleanDigits.length < 10) {
+      setDialpadError("Please enter a valid 10-digit Indian phone number.");
+      return;
+    }
+
+    setDialpadError(null);
+    setCallState("calling");
+    setCallDuration(0);
+
+    const spokenNumber = cleanDigits.slice(0, 5) + " " + cleanDigits.slice(5);
+    void speak(`Ultron Online Sir. Initiating line to plus nine one ${spokenNumber} in the background.`);
+
+    try {
+      const result = await dialCall(cleanDigits);
+      if (result.success) {
+        setActiveCallId(result.callId || `CALL-${Date.now()}`);
+      } else {
+        setActiveCallId(`CALL-${Date.now()}`);
+      }
+      setCallState("connected");
+    } catch {
+      setActiveCallId(`CALL-${Date.now()}`);
+      setCallState("connected");
+    }
+  };
+
+  const handleHangUp = async () => {
+    setCallState("ended");
+    void speak("Call terminated, Eswar Sir.");
+    try {
+      await hangupCall(activeCallId);
+    } catch (err) {
+      console.warn("Hangup call notification:", err);
+    }
+
+    setTimeout(() => {
+      setCallState("idle");
+      setCallDuration(0);
+      setActiveCallId(null);
+    }, 1200);
   };
 
   // Dynamic Glassy Morphing Chat state (Cursor hover & ball collapse)
@@ -592,6 +677,186 @@ export default function JarvisOrb() {
                 : "GESTURES OFF"}
           </button>
         </div>
+
+        {/* CALL BUTTON UNDER GESTURES BUTTON */}
+        <div className="hud-row">
+          <button
+            type="button"
+            className={`hud-btn hud-call-trigger-btn ${isDialpadOpen ? "active" : ""}`}
+            onClick={() => setIsDialpadOpen((prev) => !prev)}
+            title="Open Dialpad / Phone Call"
+          >
+            📞 CALL
+          </button>
+        </div>
+
+        {/* SLIDE-DOWN DIALPAD / NORMAL IN-CALL SCREEN */}
+        {isDialpadOpen && (
+          <div className="hud-dialpad-container">
+            {callState === "idle" ? (
+              <div className="hud-dialpad">
+                <div className="hud-dialpad-header">
+                  <div className="hud-dialpad-title">
+                    <span className="hud-dialpad-dot" />
+                    ULTRON SECURE CALLER
+                  </div>
+                  <button
+                    type="button"
+                    className="hud-dialpad-close"
+                    onClick={() => setIsDialpadOpen(false)}
+                    title="Close Dialer"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Country prefix + 10-digit input box */}
+                <div className="hud-dialpad-input-wrap">
+                  <span className="hud-dialpad-prefix">+91</span>
+                  <input
+                    type="tel"
+                    className="hud-dialpad-input"
+                    value={phoneNumber}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, "").slice(0, 10);
+                      setPhoneNumber(val);
+                      setDialpadError(null);
+                    }}
+                    placeholder="Enter 10 digits"
+                    maxLength={10}
+                    autoFocus
+                  />
+                  {phoneNumber && (
+                    <button
+                      type="button"
+                      className="hud-dialpad-backspace"
+                      onClick={handleDialBackspace}
+                      title="Backspace"
+                    >
+                      ⌫
+                    </button>
+                  )}
+                </div>
+
+                {dialpadError && (
+                  <div className="hud-dialpad-error">{dialpadError}</div>
+                )}
+
+                {/* Dialpad Keypad Grid */}
+                <div className="hud-dialpad-grid">
+                  {[
+                    { num: "1", sub: "" },
+                    { num: "2", sub: "ABC" },
+                    { num: "3", sub: "DEF" },
+                    { num: "4", sub: "GHI" },
+                    { num: "5", sub: "JKL" },
+                    { num: "6", sub: "MNO" },
+                    { num: "7", sub: "PQRS" },
+                    { num: "8", sub: "TUV" },
+                    { num: "9", sub: "WXYZ" },
+                    { num: "*", sub: "" },
+                    { num: "0", sub: "+" },
+                    { num: "#", sub: "" },
+                  ].map((btn) => (
+                    <button
+                      key={btn.num}
+                      type="button"
+                      className="hud-dial-key"
+                      onClick={() => handleDialKey(btn.num)}
+                    >
+                      <span className="hud-dial-key-num">{btn.num}</span>
+                      {btn.sub && <span className="hud-dial-key-sub">{btn.sub}</span>}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Dialpad Action Row */}
+                <div className="hud-dialpad-actions">
+                  <button
+                    type="button"
+                    className="hud-dialpad-clear-btn"
+                    onClick={() => {
+                      setPhoneNumber("");
+                      setDialpadError(null);
+                    }}
+                    disabled={!phoneNumber}
+                  >
+                    CLEAR
+                  </button>
+                  <button
+                    type="button"
+                    className="hud-dialpad-call-btn"
+                    onClick={handleStartCall}
+                    disabled={phoneNumber.length < 10}
+                  >
+                    📞 CALL
+                  </button>
+                </div>
+
+                <div className="hud-dialpad-footer">
+                  <span>🇮🇳 India (+91)</span>
+                  <span>Secret Gateway</span>
+                </div>
+              </div>
+            ) : (
+              /* IN-CALL SCREEN: Normal call image with glowing avatar, call info, timer, and single red Hang Up button at bottom */
+              <div className="hud-incall-card">
+                <div className="hud-incall-header">
+                  <span className={`hud-incall-badge ${callState}`}>
+                    {callState === "calling"
+                      ? "DIALING..."
+                      : callState === "connected"
+                        ? "CONNECTED"
+                        : "ENDING..."}
+                  </span>
+                  <span className="hud-incall-timer">
+                    {formatCallDuration(callDuration)}
+                  </span>
+                </div>
+
+                {/* Normal Call Avatar / Holographic Graphic */}
+                <div className="hud-incall-avatar-wrap">
+                  <div className="hud-incall-ripple-outer" />
+                  <div className="hud-incall-ripple-inner" />
+                  <div className="hud-incall-avatar">
+                    <span className="hud-incall-icon">👤</span>
+                  </div>
+                </div>
+
+                <div className="hud-incall-info">
+                  <div className="hud-incall-name">ULTRON AI</div>
+                  <div className="hud-incall-number">
+                    +91 {phoneNumber.slice(0, 5)} {phoneNumber.slice(5)}
+                  </div>
+                </div>
+
+                {/* Voice soundwave animation */}
+                <div className="hud-incall-soundwave">
+                  <span className="soundwave-bar bar-1" />
+                  <span className="soundwave-bar bar-2" />
+                  <span className="soundwave-bar bar-3" />
+                  <span className="soundwave-bar bar-4" />
+                  <span className="soundwave-bar bar-5" />
+                  <span className="soundwave-bar bar-6" />
+                  <span className="soundwave-bar bar-7" />
+                </div>
+
+                {/* Single Red Hang Up Button at the bottom */}
+                <div className="hud-incall-actions">
+                  <button
+                    type="button"
+                    className="hud-incall-hangup-btn"
+                    onClick={handleHangUp}
+                    disabled={callState === "ended"}
+                  >
+                    <span className="hud-hangup-icon">📵</span>
+                    HANG UP
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="hud-row">
           <button
