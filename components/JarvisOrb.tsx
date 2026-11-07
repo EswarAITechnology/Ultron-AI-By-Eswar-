@@ -15,6 +15,7 @@ import {
 import {
   HandTracker,
   type TrackerStatus,
+  preloadHandTracker,
 } from "@/lib/handTracker";
 
 import {
@@ -100,6 +101,7 @@ export default function JarvisOrb() {
   const [testVoiceLoading, setTestVoiceLoading] = useState(false);
 
   useEffect(() => {
+    preloadHandTracker();
     setFishKey(getStoredFishApiKey());
     setFishRefId(getStoredFishRefId());
   }, []);

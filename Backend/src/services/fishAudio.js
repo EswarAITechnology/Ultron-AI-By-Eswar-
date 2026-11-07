@@ -41,6 +41,31 @@ export async function generateSpeech(text, customApiKey, customReferenceId) {
 
   let lastError = null;
 
+  // 1. Primary standard Fish Audio request (clean headers)
+  try {
+    const stdRes = await fetch("https://api.fish.audio/v1/tts", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        text: speechText,
+        reference_id: jarvisReferenceId,
+        format: "mp3",
+        latency: "balanced",
+        normalize: true
+      }),
+      signal: AbortSignal.timeout(25000)
+    });
+
+    if (stdRes.ok) {
+      return Buffer.from(await stdRes.arrayBuffer());
+    }
+  } catch (stdErr) {
+    console.warn("Fish Audio standard request note:", stdErr?.message || stdErr);
+  }
+
   for (const model of modelsToTry) {
     try {
       const response = await fetch("https://api.fish.audio/v1/tts", {

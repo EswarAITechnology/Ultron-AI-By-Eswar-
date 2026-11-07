@@ -7,6 +7,95 @@ import {
 const WASM_CDN =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm";
 
+let filesetPromise: Promise<unknown> | null = null;
+let sharedLandmarker: HandLandmarker | null = null;
+let landmarkerPromise: Promise<HandLandmarker> | null = null;
+
+export function preloadHandTracker(): void {
+  if (typeof window === "undefined") return;
+  if (sharedLandmarker || landmarkerPromise) return;
+
+  landmarkerPromise = (async () => {
+    if (!filesetPromise) {
+      filesetPromise = FilesetResolver.forVisionTasks(WASM_CDN);
+    }
+    const resolvedFileset = (await filesetPromise) as Parameters<typeof HandLandmarker.createFromOptions>[0];
+    const commonOpts = {
+      runningMode: "VIDEO" as const,
+      numHands: 2,
+      minHandDetectionConfidence: 0.55,
+      minHandPresenceConfidence: 0.55,
+      minTrackingConfidence: 0.55,
+    };
+    try {
+      sharedLandmarker = await HandLandmarker.createFromOptions(resolvedFileset, {
+        ...commonOpts,
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" as const },
+      });
+    } catch {
+      sharedLandmarker = await HandLandmarker.createFromOptions(resolvedFileset, {
+        ...commonOpts,
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" as const },
+      });
+    }
+    return sharedLandmarker;
+  })();
+}
+
+/*
+  if (typeof window === "undefined") return;
+  if (sharedLandmarker || landmarkerPromise) return;
+
+  landmarkerPromise = (async () => {
+    if (!filesetPromise) {
+      filesetPromise = FilesetResolver.forVisionTasks(WASM_CDN);
+    }
+    if (!sharedLandmarker && !landmarkerPromise) {
+      preloadHandTracker();
+    }
+    this.landmarker = sharedLandmarker || (await landmarkerPromise!);
+
+    this.running = true;
+    this.lastVideoTime = -1;
+    this.lastDetectionTime = 0;
+    this.detectionInterval = MIN_DETECTION_INTERVAL;
+    this.loop();
+    return;
+
+    const fileset = (await filesetPromise) as Parameters<typeof HandLandmarker.createFromOptions>[0];
+
+    const commonOptions = {
+      runningMode: "VIDEO" as const,
+      numHands: 2,
+      minHandDetectionConfidence: 0.55,
+      minHandPresenceConfidence: 0.55,
+      minTrackingConfidence: 0.55,
+    };
+
+    try {
+      sharedLandmarker = await HandLandmarker.createFromOptions(fileset, {
+        ...commonOptions,
+        baseOptions: {
+          modelAssetPath: MODEL_URL,
+          delegate: "GPU" as const,
+        },
+      });
+    } catch {
+      sharedLandmarker = await HandLandmarker.createFromOptions(fileset, {
+        ...commonOptions,
+        baseOptions: {
+          modelAssetPath: MODEL_URL,
+          delegate: "CPU" as const,
+        },
+      });
+    }
+
+    return sharedLandmarker;
+  })();
+}
+
+*/
+
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
@@ -188,18 +277,18 @@ export class HandTracker {
             facingMode: "user",
 
             width: {
-              ideal: 1280,
+              ideal: 640,
               max: 1920,
             },
 
             height: {
-              ideal: 720,
+              ideal: 480,
               max: 1080,
             },
 
             frameRate: {
-              ideal: 60,
-              max: 60,
+              ideal: 30,
+              max: 30,
             },
           },
 
@@ -215,6 +304,18 @@ export class HandTracker {
     this.video.playsInline = true;
 
     await this.video.play();
+
+    if (!sharedLandmarker && !landmarkerPromise) {
+      preloadHandTracker();
+    }
+    this.landmarker = sharedLandmarker || (await landmarkerPromise!);
+
+    this.running = true;
+    this.lastVideoTime = -1;
+    this.lastDetectionTime = 0;
+    this.detectionInterval = MIN_DETECTION_INTERVAL;
+    this.loop();
+    return;
 
     const fileset =
       await FilesetResolver.forVisionTasks(
@@ -298,9 +399,9 @@ export class HandTracker {
 
     this.rafId = 0;
 
-    this.landmarker?.close();
+    // keep landmarker cached for instant camera restarts
 
-    this.landmarker = null;
+    // landmarker cached
 
     this.stream
       ?.getTracks()
