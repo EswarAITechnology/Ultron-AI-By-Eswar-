@@ -197,6 +197,7 @@ if (typeof window !== "undefined" && "speechSynthesis" in window) {
  * Strictly maintains consistent voice across all questions.
  */
 export async function speakWithJarvisSynthesis(text: string): Promise<void> {
+  const voice = await getLockedJarvisVoiceAsync();
   return new Promise((resolve) => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) {
       resolve();
@@ -213,7 +214,7 @@ export async function speakWithJarvisSynthesis(text: string): Promise<void> {
 
     const utterance = new SpeechSynthesisUtterance(clean);
 
-    const voice = await getLockedJarvisVoiceAsync();
+    // voice applied
     if (voice) {
       utterance.voice = voice;
     }
